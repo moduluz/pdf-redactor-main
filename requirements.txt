@@ -1,0 +1,8 @@
+PyMuPDF
+phonenumbers
+spacy
+fuzzywuzzy
+python-Levenshtein
+pytesseract
+langdetect
+Pillow 
