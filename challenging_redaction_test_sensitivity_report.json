@@ -1,0 +1,611 @@
+{
+  "file": "challenging_redaction_test.pdf",
+  "scan_timestamp": "2025-02-25T23:41:39.087217",
+  "findings_summary": {
+    "total_findings": 147,
+    "by_category": {
+      "Credit Card Numbers": 28,
+      "CVV/CVC Codes": 6,
+      "Card Expiration Dates": 2,
+      "BIC/SWIFT Codes": 111
+    }
+  },
+  "findings": {
+    "Credit Card Numbers": [
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "4111-1111-1111-1111",
+        "page": 3
+      },
+      {
+        "value": "4111111111111111",
+        "page": 3
+      },
+      {
+        "value": "3704 0044 0532 0130",
+        "page": 3
+      },
+      {
+        "value": "3704 0044 0532 0130",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 5
+      },
+      {
+        "value": "4111111111111111",
+        "page": 6
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 6
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 6
+      },
+      {
+        "value": "4111-1111-1111-1111",
+        "page": 7
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "3704 0044 0532 0130",
+        "page": 3
+      },
+      {
+        "value": "3704 0044 0532 0130",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 3
+      },
+      {
+        "value": "4111 1111 1111 1111",
+        "page": 5
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 6
+      },
+      {
+        "value": "5500 0000 0000 0004",
+        "page": 6
+      },
+      {
+        "value": "4111-1111-1111-1111",
+        "page": 3
+      },
+      {
+        "value": "4111-1111-1111-1111",
+        "page": 7
+      },
+      {
+        "value": "4111111111111111",
+        "page": 3
+      },
+      {
+        "value": "4111111111111111",
+        "page": 6
+      },
+      {
+        "value": "4111111111111111",
+        "page": 3
+      },
+      {
+        "value": "4111111111111111",
+        "page": 6
+      }
+    ],
+    "CVV/CVC Codes": [
+      {
+        "value": "CVV: 123",
+        "page": 3
+      },
+      {
+        "value": "CVC: 789",
+        "page": 5
+      },
+      {
+        "value": "CV2: 987",
+        "page": 3
+      },
+      {
+        "value": "Security Code: 456",
+        "page": 3
+      },
+      {
+        "value": "Security Code: 456",
+        "page": 3
+      },
+      {
+        "value": "Security Code: 456",
+        "page": 3
+      }
+    ],
+    "Card Expiration Dates": [
+      {
+        "value": "Valid Thru: 01/26",
+        "page": 5
+      },
+      {
+        "value": "Exp. Date: 10/27",
+        "page": 3
+      }
+    ],
+    "BIC/SWIFT Codes": [
+      {
+        "value": "DOCUMENT",
+        "page": 1
+      },
+      {
+        "value": "Document",
+        "page": 1
+      },
+      {
+        "value": "Challenging",
+        "page": 1
+      },
+      {
+        "value": "document",
+        "page": 1
+      },
+      {
+        "value": "contains",
+        "page": 1
+      },
+      {
+        "value": "information",
+        "page": 1
+      },
+      {
+        "value": "designed",
+        "page": 1
+      },
+      {
+        "value": "Document",
+        "page": 1
+      },
+      {
+        "value": "Document",
+        "page": 1
+      },
+      {
+        "value": "Overview",
+        "page": 1
+      },
+      {
+        "value": "Personal",
+        "page": 1
+      },
+      {
+        "value": "Information",
+        "page": 1
+      },
+      {
+        "value": "Information",
+        "page": 1
+      },
+      {
+        "value": "Elements",
+        "page": 1
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 2
+      },
+      {
+        "value": "Document",
+        "page": 2
+      },
+      {
+        "value": "Personal",
+        "page": 2
+      },
+      {
+        "value": "Information",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Williams",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "McDowell",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "Customer",
+        "page": 2
+      },
+      {
+        "value": "corporation",
+        "page": 2
+      },
+      {
+        "value": "business",
+        "page": 2
+      },
+      {
+        "value": "lastname",
+        "page": 2
+      },
+      {
+        "value": "provider",
+        "page": 2
+      },
+      {
+        "value": "IIIIIIII",
+        "page": 2
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 3
+      },
+      {
+        "value": "Document",
+        "page": 3
+      },
+      {
+        "value": "Information",
+        "page": 3
+      },
+      {
+        "value": "Security",
+        "page": 3
+      },
+      {
+        "value": "Security",
+        "page": 3
+      },
+      {
+        "value": "Security",
+        "page": 3
+      },
+      {
+        "value": "Security",
+        "page": 3
+      },
+      {
+        "value": "Information",
+        "page": 3
+      },
+      {
+        "value": "DEUTDEFF",
+        "page": 3
+      },
+      {
+        "value": "SOGEFRPP",
+        "page": 3
+      },
+      {
+        "value": "contains",
+        "page": 3
+      },
+      {
+        "value": "contains",
+        "page": 3
+      },
+      {
+        "value": "contains",
+        "page": 3
+      },
+      {
+        "value": "contains",
+        "page": 3
+      },
+      {
+        "value": "PERSONAL",
+        "page": 3
+      },
+      {
+        "value": "contains",
+        "page": 3
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 4
+      },
+      {
+        "value": "Document",
+        "page": 4
+      },
+      {
+        "value": "Customer",
+        "page": 4
+      },
+      {
+        "value": "Customer",
+        "page": 4
+      },
+      {
+        "value": "Verified",
+        "page": 4
+      },
+      {
+        "value": "identity",
+        "page": 4
+      },
+      {
+        "value": "security",
+        "page": 4
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 5
+      },
+      {
+        "value": "Document",
+        "page": 5
+      },
+      {
+        "value": "Transaction",
+        "page": 5
+      },
+      {
+        "value": "Description",
+        "page": 5
+      },
+      {
+        "value": "Purchase",
+        "page": 5
+      },
+      {
+        "value": "Transfer",
+        "page": 5
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 6
+      },
+      {
+        "value": "Document",
+        "page": 6
+      },
+      {
+        "value": "Customer",
+        "page": 6
+      },
+      {
+        "value": "Database",
+        "page": 6
+      },
+      {
+        "value": "Customer",
+        "page": 6
+      },
+      {
+        "value": "Information",
+        "page": 6
+      },
+      {
+        "value": "DEUTDEFF",
+        "page": 6
+      },
+      {
+        "value": "provider",
+        "page": 6
+      },
+      {
+        "value": "Williams",
+        "page": 6
+      },
+      {
+        "value": "business",
+        "page": 6
+      },
+      {
+        "value": "IIIIIIII",
+        "page": 6
+      },
+      {
+        "value": "SOGEFRPP",
+        "page": 6
+      },
+      {
+        "value": "CORPORATION",
+        "page": 6
+      },
+      {
+        "value": "DOCUMENT",
+        "page": 7
+      },
+      {
+        "value": "Document",
+        "page": 7
+      },
+      {
+        "value": "Elements",
+        "page": 7
+      },
+      {
+        "value": "Embedded",
+        "page": 7
+      },
+      {
+        "value": "Information",
+        "page": 7
+      },
+      {
+        "value": "Document",
+        "page": 7
+      },
+      {
+        "value": "Headings",
+        "page": 7
+      },
+      {
+        "value": "Information",
+        "page": 7
+      },
+      {
+        "value": "contains",
+        "page": 7
+      },
+      {
+        "value": "information",
+        "page": 7
+      },
+      {
+        "value": "challenging",
+        "page": 7
+      },
+      {
+        "value": "headings",
+        "page": 7
+      },
+      {
+        "value": "Information",
+        "page": 7
+      },
+      {
+        "value": "contains",
+        "page": 7
+      },
+      {
+        "value": "information",
+        "page": 7
+      },
+      {
+        "value": "challenging",
+        "page": 7
+      },
+      {
+        "value": "headings",
+        "page": 7
+      },
+      {
+        "value": "Customer",
+        "page": 7
+      },
+      {
+        "value": "contains",
+        "page": 7
+      },
+      {
+        "value": "information",
+        "page": 7
+      },
+      {
+        "value": "challenging",
+        "page": 7
+      },
+      {
+        "value": "headings",
+        "page": 7
+      },
+      {
+        "value": "contains",
+        "page": 7
+      },
+      {
+        "value": "information",
+        "page": 7
+      },
+      {
+        "value": "challenging",
+        "page": 7
+      },
+      {
+        "value": "headings",
+        "page": 7
+      },
+      {
+        "value": "Information",
+        "page": 7
+      },
+      {
+        "value": "contains",
+        "page": 7
+      },
+      {
+        "value": "information",
+        "page": 7
+      },
+      {
+        "value": "challenging",
+        "page": 7
+      },
+      {
+        "value": "headings",
+        "page": 7
+      },
+      {
+        "value": "Contrast",
+        "page": 7
+      },
+      {
+        "value": "contrast",
+        "page": 7
+      },
+      {
+        "value": "BIC: SOGEFRPP",
+        "page": 3
+      }
+    ]
+  }
+}
