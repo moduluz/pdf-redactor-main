@@ -22,7 +22,6 @@ from reportlab.graphics.barcode import qr
 from reportlab.graphics import renderPDF
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-import qrcode
 from io import BytesIO
 import random
 

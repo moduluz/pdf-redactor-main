@@ -1,0 +1,106 @@
+<think>Let me compile a comprehensive list of all the useful commands for the PDF Redactor tool based on what we've seen in the code and the README.</think>I'll compile a comprehensive list of all useful commands for this PDF Redactor tool based on the code and documentation we've reviewed.
+
+## PDF Redactor - All Useful Commands
+
+### Basic Usage Commands
+
+```bash
+# Basic redaction with default settings
+python pdf_redactor.py -i input.pdf
+
+# Specify output file
+python pdf_redactor.py -i input.pdf -o output.pdf
+
+# Process all PDFs in a directory
+python pdf_redactor.py -i /path/to/directory
+```
+
+### Content-Specific Redaction
+
+```bash
+# Redact phone numbers
+python pdf_redactor.py -i input.pdf --phonenumber
+
+# Redact email addresses
+python pdf_redactor.py -i input.pdf --email
+
+# Redact IBAN numbers
+python pdf_redactor.py -i input.pdf --iban
+
+# Redact credit card numbers
+python pdf_redactor.py -i input.pdf --cc
+
+# Redact credit card CVV codes
+python pdf_redactor.py -i input.pdf --cvv
+
+# Redact credit card expiration dates
+python pdf_redactor.py -i input.pdf --cc-expiration
+
+# Redact BIC/SWIFT codes
+python pdf_redactor.py -i input.pdf --bic
+
+# Redact BIC/SWIFT labels
+python pdf_redactor.py -i input.pdf --bic-label
+
+# Redact a custom text/phrase
+python pdf_redactor.py -i input.pdf --mask "sensitive text"
+
+# Combine multiple redaction types
+python pdf_redactor.py -i input.pdf --email --phonenumber --iban --cc
+```
+
+### Visual Redaction Options
+
+```bash
+# Change redaction color (options: black, white, red, green, blue)
+python pdf_redactor.py -i input.pdf --color red
+
+# Use blur redaction style instead of solid blocks
+python pdf_redactor.py -i input.pdf --blur
+
+# Redact images in the PDF
+python pdf_redactor.py -i input.pdf --redact-images
+
+# Don't preserve headings (redact them too)
+python pdf_redactor.py -i input.pdf --no-preserve-headings
+```
+
+### Analysis and Verification
+
+```bash
+# Generate a report without performing redactions
+python pdf_redactor.py -i input.pdf --report-only
+
+# Verify redaction was successful
+python pdf_redactor.py -i input.pdf --verify
+```
+
+### Complete Examples
+
+```bash
+# Comprehensive redaction with verification
+python pdf_redactor.py -i input.pdf --email --phonenumber --iban --cc --cvv --cc-expiration --bic --verify
+
+# Redact all sensitive information with red blur style
+python pdf_redactor.py -i input.pdf --email --phonenumber --iban --cc --color red --blur
+
+# Generate only a report for all PDFs in a directory
+python pdf_redactor.py -i /path/to/directory --report-only
+
+# Redact custom text and all images with green color
+python pdf_redactor.py -i input.pdf --mask "confidential data" --redact-images --color green
+
+# Full redaction with non-default output path
+python pdf_redactor.py -i input.pdf -o /different/path/redacted.pdf --email --phonenumber --iban
+```
+
+### Language Options
+
+```bash
+# Specify language for detection patterns (default is auto-detect)
+python pdf_redactor.py -i input.pdf --language fr  # For French
+python pdf_redactor.py -i input.pdf --language de  # For German
+python pdf_redactor.py -i input.pdf --language es  # For Spanish
+```
+
+These commands cover all the main functionality of the PDF Redactor tool. The tool is designed to be flexible and can combine multiple options to fit your specific redaction needs.
