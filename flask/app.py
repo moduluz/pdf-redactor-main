@@ -73,28 +73,45 @@ def redact():
             return redirect(url_for('index'))
         
         logger.info("Creating redaction configuration")
+        # Get form data with proper boolean conversion
+        def get_bool_param(param_name):
+            return request.form.get(param_name, 'off') == 'on'
+        
         # Log redaction options
         redaction_options = {
-            'redact_phone': request.form.get('redact_phone') == 'on',
-            'redact_email': request.form.get('redact_email') == 'on',
-            'redact_iban': request.form.get('redact_iban') == 'on',
-            'redact_cc': request.form.get('redact_cc') == 'on',
-            'redact_cvv': request.form.get('redact_cvv') == 'on',
-            'redact_cc_expiration': request.form.get('redact_cc_expiration') == 'on',
-            'redact_bic': request.form.get('redact_bic') == 'on',
-            'redact_bic_label': request.form.get('redact_bic_label') == 'on',
-            'redact_images': request.form.get('redact_images') == 'on',
-            'preserve_headings': request.form.get('preserve_headings') == 'on',
-            'redact_aadhaar': request.form.get('redact_aadhaar') == 'on',
-            'redact_pan': request.form.get('redact_pan') == 'on',
-            'custom_mask': request.form.get('custom_mask'),
-            'report_only': request.form.get('report_only') == 'on',
-            'verify': request.form.get('verify') == 'on',
-            'use_blur': request.form.get('use_blur') == 'on',
+            'redact_phone': get_bool_param('redact_phone'),
+            'redact_email': get_bool_param('redact_email'),
+            'redact_iban': get_bool_param('redact_iban'),
+            'redact_cc': get_bool_param('redact_cc'),
+            'redact_cvv': get_bool_param('redact_cvv'),
+            'redact_cc_expiration': get_bool_param('redact_cc_expiration'),
+            'redact_bic': get_bool_param('redact_bic'),
+            'redact_bic_label': get_bool_param('redact_bic_label'),
+            'redact_images': get_bool_param('redact_images'),
+            'preserve_headings': get_bool_param('preserve_headings'),
+            'redact_aadhaar': get_bool_param('redact_aadhaar'),
+            'redact_pan': get_bool_param('redact_pan'),
+            'custom_mask': request.form.get('custom_mask', ''),
+            'report_only': get_bool_param('report_only'),
+            'verify': get_bool_param('verify'),
+            'use_blur': get_bool_param('use_blur'),
             'color': request.form.get('color', 'black'),
             'language': request.form.get('language', 'auto')
         }
+        
         logger.debug(f"Redaction options: {redaction_options}")
+        
+        # Validate that at least one redaction option is selected
+        redaction_types = [
+            'redact_phone', 'redact_email', 'redact_iban', 'redact_cc',
+            'redact_cvv', 'redact_cc_expiration', 'redact_bic',
+            'redact_aadhaar', 'redact_pan'
+        ]
+        
+        if not any(redaction_options[opt] for opt in redaction_types):
+            logger.error("No redaction options selected")
+            flash('Please select at least one type of information to redact', 'error')
+            return redirect(url_for('index'))
         
         # Create a redaction configuration
         config = RedactionConfig(
