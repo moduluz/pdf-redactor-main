@@ -17,6 +17,8 @@ from fuzzywuzzy import process
 import io
 import pytesseract
 from langdetect import detect, DetectorFactory, detect_langs
+import cv2
+import numpy as np
 
 # Make language detection deterministic
 DetectorFactory.seed = 0
@@ -631,144 +633,175 @@ class PDFRedactor:
             print("[i] Make sure to check 'Add to PATH' during installation.")
             return []
         
-        print("\n[i] Searching for text in images...")
-        image_redaction_info = []
+        try:
+            import cv2
+            import numpy as np
+            has_cv2 = True
+            # Load face detection cascade
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            if face_cascade.empty():
+                print("[Warning] Could not load face cascade classifier")
+                has_cv2 = False
+        except ImportError:
+            print("\n[Warning] OpenCV (cv2) not found. Face detection will be limited.")
+            has_cv2 = False
         
-        # Define all sensitive data patterns
-        pattern_groups = {
-            "Credit Cards": [
-                r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                r"\b\d{13,16}\b",
-                r"\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|3(?:0[0-5]|[68]\d)\d{11}|6(?:011|5\d{2})\d{12})\b"
-            ],
-            "CVV/CVC": [
-                r"\bCVV\s*:?\s*\d{3,4}\b",
-                r"\bCVC\s*:?\s*\d{3,4}\b",
-                r"\bCV2\s*:?\s*\d{3,4}\b",
-                r"\bCSC\s*:?\s*\d{3,4}\b",
-                r"\bCID\s*:?\s*\d{3,4}\b"
-            ],
-            "Expiration Dates": [
-                r"\bExp(?:iry|iration)?\s*:?\s*\d{1,2}/\d{2,4}\b",
-                r"\bValid Thru\s*:?\s*\d{1,2}/\d{2,4}\b"
-            ],
-            "SSN": [
-                r"\bSSN\s*:?\s*\d{3}[-]?\d{2}[-]?\d{4}\b",
-                r"\bSocial Security\s*:?\s*\d{3}[-]?\d{2}[-]?\d{4}\b"
-            ],
-            "Phone Numbers": [
-                r"\b(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-                r"\bPhone\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}\b"
-            ],
-            "Email Addresses": [
-                r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-            ],
-            "IBAN/BIC": [
-                r"\bIBAN\s*:?\s*[A-Z]{2}[0-9]{2}[0-9A-Z]{10,30}\b",
-                r"\bBIC\s*:?\s*[A-Z0-9]{8,11}\b"
-            ]
-        }
+        print("\n[i] Searching for text and personal images...")
+        image_redaction_info = []
         
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
-            images = page.get_images(full=True)
             
-            if not images:
-                continue
+            try:
+                # Get all images on the page
+                image_list = page.get_images(full=True)
+                if not image_list:
+                    continue
                 
-            print(f" |  Processing {len(images)} images on Page {page_num+1}")
-            
-            for img_index, img_info in enumerate(images):
-                xref = img_info[0]
-                try:
-                    base_image = pdf_document.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    
-                    # Try multiple OCR approaches for better accuracy
-                    pil_image = Image.open(io.BytesIO(image_bytes))
-                    
-                    # Try with default OCR
-                    text = pytesseract.image_to_string(pil_image)
-                    
-                    # If image is large, also try with higher DPI setting
-                    if pil_image.width > 1000 or pil_image.height > 1000:
-                        text_hq = pytesseract.image_to_string(
-                            pil_image, 
-                            config='--oem 1 --psm 3 -c preserve_interword_spaces=1'
+                print(f" |  Processing {len(image_list)} images on Page {page_num + 1}")
+                
+                # Get page dimensions
+                page_rect = page.rect
+                
+                # Get all image blocks on the page
+                image_blocks = []
+                for block in page.get_text("dict")["blocks"]:
+                    if block.get("type") == 1:  # Type 1 is image
+                        image_blocks.append(block)
+                
+                for img_index, img in enumerate(image_list):
+                    try:
+                        xref = img[0]
+                        base_image = pdf_document.extract_image(xref)
+                        image_bytes = base_image["image"]
+                        
+                        # Convert to PIL Image
+                        pil_image = Image.open(io.BytesIO(image_bytes))
+                        width, height = pil_image.size
+                        
+                        # Convert to numpy array for OpenCV processing
+                        if has_cv2:
+                            cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+                        
+                        # Check for faces if OpenCV is available
+                        has_face = False
+                        if has_cv2:
+                            try:
+                                # Detect faces with different scale factors for better accuracy
+                                scale_factors = [1.1, 1.2, 1.3]
+                                min_neighbors_values = [3, 4, 5]
+                                
+                                for scale_factor in scale_factors:
+                                    for min_neighbors in min_neighbors_values:
+                                        faces = face_cascade.detectMultiScale(
+                                            gray,
+                                            scaleFactor=scale_factor,
+                                            minNeighbors=min_neighbors,
+                                            minSize=(20, 20)
+                                        )
+                                        if len(faces) > 0:
+                                            has_face = True
+                                            print(f" |  Found {len(faces)} face(s) in image {img_index+1} on Page {page_num+1}")
+                                            break
+                                    if has_face:
+                                        break
+                            except Exception as e:
+                                print(f" |  Error during face detection: {e}")
+                        
+                        # Check image dimensions for potential passport/ID photos
+                        aspect_ratio = width / height
+                        is_potential_id = (
+                            (width <= 800 and height <= 1000) and  # Common passport/ID photo size
+                            (0.6 <= aspect_ratio <= 1.0)  # Common passport/ID photo aspect ratio
                         )
-                        text += "\n" + text_hq
-                    
-                    # Try with different PSM mode for single column of text
-                    text_alt = pytesseract.image_to_string(
-                        pil_image,
-                        config='--psm 6'
-                    )
-                    text += "\n" + text_alt
-                    
-                    if text.strip():
-                        found_sensitive_data = False
-                        found_data_types = []
-                        found_matches = {}
                         
-                        # Check for each pattern group
-                        for data_type, patterns in pattern_groups.items():
-                            data_type_matches = []
-                            for pattern in patterns:
-                                matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
-                                if matches:
-                                    found_sensitive_data = True
-                                    found_data_types.append(data_type)
-                                    data_type_matches.extend(matches)
-                                    print(f" |  Found {data_type} in image {img_index+1} on Page {page_num+1}")
-                            
-                            if data_type_matches:
-                                found_matches[data_type] = list(set(data_type_matches))
+                        # Try OCR for text-based sensitive info
+                        text = pytesseract.image_to_string(pil_image)
                         
-                        # If sensitive info found, redact the entire image
-                        if found_sensitive_data:
-                            print(f" |  Redacting image containing: {', '.join(found_data_types)}")
-                            
-                            # Get the image rectangle
-                            img_rect = None
-                            for rect, xref_obj in zip(page.get_image_rects(), page.get_images(full=True)):
-                                if xref_obj[0] == xref:
-                                    img_rect = rect
+                        # Additional OCR for high-res images
+                        if width > 1000 or height > 1000:
+                            text_hq = pytesseract.image_to_string(
+                                pil_image,
+                                config='--oem 1 --psm 3 -c preserve_interword_spaces=1'
+                            )
+                            text += "\n" + text_hq
+                        
+                        # Check for sensitive information
+                        found_sensitive = False
+                        found_types = []
+                        
+                        # Add face detection result
+                        if has_face:
+                            found_sensitive = True
+                            found_types.append("Face Detected")
+                        
+                        # Add potential ID photo detection
+                        if is_potential_id:
+                            found_sensitive = True
+                            found_types.append("Potential ID Photo")
+                        
+                        # Check for phone numbers
+                        if config.redact_phone:
+                            phone_patterns = [
+                                r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+                                r"\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b"
+                            ]
+                            for pattern in phone_patterns:
+                                if re.search(pattern, text):
+                                    found_sensitive = True
+                                    found_types.append("Phone Numbers")
                                     break
+                        
+                        # Check for email addresses
+                        if config.redact_email:
+                            email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                            if re.search(email_pattern, text):
+                                found_sensitive = True
+                                found_types.append("Email Addresses")
+                        
+                        if found_sensitive:
+                            print(f" |  Found sensitive information in image {img_index+1} on Page {page_num+1}: {', '.join(found_types)}")
                             
-                            if img_rect:
-                                # Apply redaction based on config
-                                if config.use_blur:
-                                    # Use blur style redaction (semi-transparent with text)
-                                    blur_text = "[IMAGE REDACTED]"
-                                    fill_color = list(self.COLORS[config.color])
-                                    fill_color.append(0.5)  # Add transparency
-                                    
+                            # Try to find the image block that matches this image
+                            image_rect = None
+                            if img_index < len(image_blocks):
+                                block = image_blocks[img_index]
+                                image_rect = fitz.Rect(block["bbox"])
+                            
+                            # If we found a rectangle, apply redaction
+                            if image_rect and image_rect.is_valid and not image_rect.is_empty:
+                                try:
+                                    # Create redaction annotation
                                     annot = page.add_redact_annot(
-                                        quad=img_rect,
-                                        text=blur_text,
-                                        text_color=self.COLORS["black"],
-                                        fill=fill_color,
-                                        cross_out=False
+                                        image_rect,
+                                        text="[REDACTED IMAGE]" if config.use_blur else None,
+                                        fill=self.COLORS[config.color]
                                     )
-                                else:
-                                    # Use standard block redaction
-                                    page.add_redact_annot(img_rect, fill=fitz.utils.getColor(config.color))
-                                
-                                page.apply_redactions()
-                                
-                                # Record redaction info for reporting
-                                image_info = {
-                                    "page": page_num + 1,
-                                    "image_index": img_index + 1,
-                                    "width": pil_image.width,
-                                    "height": pil_image.height,
-                                    "redaction_type": "blur" if config.use_blur else "block",
-                                    "sensitive_data_found": found_matches
-                                }
-                                image_redaction_info.append(image_info)
-                except Exception as e:
-                    print(f" |  Error processing image {img_index+1} on Page {page_num+1}: {e}")
+                                    
+                                    # Apply the redaction
+                                    page.apply_redactions()
+                                    
+                                    # Record redaction info
+                                    image_redaction_info.append({
+                                        "page": page_num + 1,
+                                        "image_index": img_index + 1,
+                                        "types": found_types,
+                                        "dimensions": f"{width}x{height}"
+                                    })
+                                    
+                                    print(f" |  Successfully redacted image {img_index+1} on Page {page_num+1}")
+                                except Exception as e:
+                                    print(f" |  Error applying redaction to image {img_index+1} on Page {page_num+1}: {e}")
+                            else:
+                                print(f" |  Could not determine location of image {img_index+1} on Page {page_num+1}")
                     
+                    except Exception as e:
+                        print(f" |  Error processing image {img_index+1} on Page {page_num+1}: {e}")
+            
+            except Exception as e:
+                print(f" |  Error getting images from Page {page_num+1}: {e}")
+        
         return image_redaction_info
 
     def verify_redaction(self, redacted_pdf_path: Path, sensitive_patterns: List[str]) -> bool:
@@ -1523,29 +1556,38 @@ class PDFRedactor:
         
         # Phone number patterns - More precise to avoid false positives
         patterns = [
-            # US/Canada format with various separators
-            r"\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
+            # US/Canada format with various separators - must have common phone prefixes
+            r"\b(?:Phone|Tel|Mobile|Cell|Contact|Call|Fax)?\s*(?::|#|number|is|at)?\s*(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
             
-            # International format
+            # International format with + prefix
             r"\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b",
             
-            # Common phone number labels
+            # Common phone number labels with numbers
             r"\b(?:phone|tel|telephone|mobile|cell|fax|work|home|office)[:.\s]+(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
             
             # Extension formats
             r"\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})(?:[-.\s]?(?:ext|x|extension)[-.\s]?\d{1,5})?\b"
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("phone", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        # Skip patterns that look like credit card numbers
+        skip_patterns = [
+            r"\b(?:\d{4}[-\s]?){4}\b",  # 16 digits with separators
+            r"\b\d{16}\b",               # 16 digits without separators
+            r"\b\d{13}\b",               # 13 digits
+            r"\b\d{15}\b",               # 15 digits
+            r"\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|3(?:0[0-5]|[68]\d)\d{11}|6(?:011|5\d{2})\d{12})\b"  # Card issuer patterns
+        ]
         
         # Find all matches and create redactions
         redactions = []
         for pattern in patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 match_text = match.group(0)
+                
+                # Skip if it matches a credit card pattern
+                is_credit_card = any(re.search(cc_pattern, match_text) for cc_pattern in skip_patterns)
+                if is_credit_card:
+                    continue
                 
                 # Skip if it's part of a heading/label and preserve_headings is True
                 if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
@@ -1684,17 +1726,17 @@ class PDFRedactor:
             r"\b65\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
             r"\b64[4-9]\d[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
             
-            # Any 16-digit number with or without spaces/dashes
-            r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            
             # Common labels with credit card numbers
-            r"\b(credit\s+card|card|cc|visa|mastercard|amex)[:.\s]+([\d\s\-]{13,19})\b"
+            r"\b(?:credit\s+card|card\s+number|cc\s+number|cc\s*#|card\s*#)[:.\s]+(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b",
+            r"\b(?:visa|mastercard|amex|discover)[:.\s]+(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b"
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("cc", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        # Skip patterns that look like phone numbers
+        skip_patterns = [
+            r"\b\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # Standard phone format
+            r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",  # (123) 456-7890
+            r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"   # 123-456-7890
+        ]
         
         # Find all matches and create redactions
         redactions = []
@@ -1702,14 +1744,10 @@ class PDFRedactor:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 match_text = match.group(0)
                 
-                # Extract the actual card number if it's in a labeled format
-                if ":" in match_text:
-                    parts = match_text.split(":")
-                    for part in parts:
-                        digits_only = ''.join(c for c in part if c.isdigit())
-                        if len(digits_only) >= 13 and len(digits_only) <= 19:
-                            match_text = part.strip()
-                            break
+                # Skip if it matches a phone number pattern
+                is_phone = any(re.search(phone_pattern, match_text) for phone_pattern in skip_patterns)
+                if is_phone:
+                    continue
                 
                 # Skip if it's part of a heading/label and preserve_headings is True
                 if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
