@@ -18,7 +18,7 @@ import io
 import pytesseract
 from langdetect import detect, DetectorFactory, detect_langs
 import cv2
-
+import numpy as np
 
 # Make language detection deterministic
 DetectorFactory.seed = 0
