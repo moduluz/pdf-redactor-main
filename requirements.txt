@@ -6,4 +6,4 @@ python-Levenshtein==0.25.0
 fuzzywuzzy==0.18.0
 langdetect==1.0.9
 opencv-python==4.9.0.80
-numpy==1.26.4 .1
+numpy==1.26.4
