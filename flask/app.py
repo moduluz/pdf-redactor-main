@@ -41,7 +41,7 @@ def redact():
         # Check if a file was uploaded
         if 'pdf_file' not in request.files:
             logger.error("No file part in request")
-            flash('No file part', 'error')
+            flash('Please select a PDF file to redact', 'error')
             return redirect(url_for('index'))
         
         pdf_file = request.files['pdf_file']
@@ -50,7 +50,7 @@ def redact():
         # Check if the file is selected
         if pdf_file.filename == '':
             logger.error("No file selected")
-            flash('No file selected', 'error')
+            flash('Please select a PDF file to redact', 'error')
             return redirect(url_for('index'))
         
         # Check if the file is a PDF
@@ -59,9 +59,18 @@ def redact():
             flash('Only PDF files are allowed', 'error')
             return redirect(url_for('index'))
         
-        # Create file paths
-        input_path = os.path.join(UPLOAD_DIR, pdf_file.filename)
-        output_filename = 'redacted_' + pdf_file.filename
+        # Check file size (limit to 50MB)
+        if len(pdf_file.read()) > 50 * 1024 * 1024:  # 50MB in bytes
+            logger.error("File too large")
+            flash('File size must be less than 50MB', 'error')
+            return redirect(url_for('index'))
+        pdf_file.seek(0)  # Reset file pointer after reading
+        
+        # Create file paths with secure filename
+        from werkzeug.utils import secure_filename
+        secure_fname = secure_filename(pdf_file.filename)
+        input_path = os.path.join(UPLOAD_DIR, secure_fname)
+        output_filename = 'redacted_' + secure_fname
         output_path = os.path.join(REDACTED_DIR, output_filename)
         
         logger.info(f"Saving uploaded file to: {input_path}")
@@ -73,9 +82,21 @@ def redact():
             return redirect(url_for('index'))
         
         logger.info("Creating redaction configuration")
-        # Get form data with proper boolean conversion
+        # Get form data with proper boolean conversion and validation
         def get_bool_param(param_name):
             return request.form.get(param_name, 'off') == 'on'
+        
+        # Validate color selection
+        color = request.form.get('color', 'black')
+        valid_colors = ['black', 'white', 'red', 'green', 'blue']
+        if color not in valid_colors:
+            color = 'black'  # Default to black if invalid
+        
+        # Validate language selection
+        language = request.form.get('language', 'auto')
+        valid_languages = ['auto', 'en', 'fr', 'de', 'es', 'it', 'pt', 'nl', 'hi', 'zh', 'ja', 'ko', 'ar', 'ru']
+        if language not in valid_languages:
+            language = 'auto'  # Default to auto if invalid
         
         # Log redaction options
         redaction_options = {
@@ -95,8 +116,8 @@ def redact():
             'report_only': get_bool_param('report_only'),
             'verify': get_bool_param('verify'),
             'use_blur': get_bool_param('use_blur'),
-            'color': request.form.get('color', 'black'),
-            'language': request.form.get('language', 'auto')
+            'color': color,
+            'language': language
         }
         
         logger.debug(f"Redaction options: {redaction_options}")
@@ -144,28 +165,38 @@ def redact():
         try:
             redactor.redact_document()
             logger.info("Redaction process completed")
+            
+            # Check if the output file exists and has content
+            if not os.path.exists(output_path):
+                raise Exception("Output file not created")
+                
+            if os.path.getsize(output_path) == 0:
+                raise Exception("Output file is empty")
+            
+            # Store the output filename in the session for download
+            session['output_filename'] = output_filename
+            
+            # Generate success message with details
+            success_msg = "PDF successfully redacted! "
+            if redactor.redaction_stats:
+                found_items = [f"{count} {item.lower()}" for item, count in redactor.redaction_stats.items() if count > 0]
+                if found_items:
+                    success_msg += f"Found and redacted: {', '.join(found_items)}."
+            
+            logger.info(success_msg)
+            flash(success_msg, 'success')
+            return redirect(url_for('download'))
+            
         except Exception as e:
-            logger.exception("Error during redaction process")
-            raise
-        
-        # Check if the output file exists and has content
-        if not os.path.exists(output_path):
-            logger.error(f"Output file not created: {output_path}")
-            flash('Redaction failed: Output file not created', 'error')
+            logger.exception("Redaction process failed")
+            error_msg = str(e)
+            if "Permission denied" in error_msg:
+                error_msg = "Cannot access the PDF file. Make sure it's not open in another program."
+            elif "not a PDF file" in error_msg:
+                error_msg = "The file appears to be corrupted or is not a valid PDF."
+            flash(f'Redaction failed: {error_msg}', 'error')
             return redirect(url_for('index'))
             
-        if os.path.getsize(output_path) == 0:
-            logger.error(f"Output file is empty: {output_path}")
-            flash('Redaction failed: Output file is empty', 'error')
-            return redirect(url_for('index'))
-        
-        # Store the output filename in the session for download
-        session['output_filename'] = output_filename
-        
-        logger.info("Redaction completed successfully")
-        flash('PDF successfully redacted!', 'success')
-        return redirect(url_for('download'))
-    
     except Exception as e:
         logger.exception("Redaction failed with error")
         flash(f'Redaction failed: {str(e)}', 'error')
@@ -185,7 +216,7 @@ def download():
         # Check if the output filename is in the session
         if 'output_filename' not in session:
             logger.error("No output filename in session")
-            flash('No redacted file available', 'error')
+            flash('No redacted file available for download', 'error')
             return redirect(url_for('index'))
         
         output_filename = session['output_filename']
@@ -194,11 +225,23 @@ def download():
         # Check if the file exists
         if not os.path.exists(output_path):
             logger.error(f"Redacted file not found: {output_path}")
-            flash('Redacted file not found', 'error')
+            flash('The redacted file is no longer available', 'error')
+            return redirect(url_for('index'))
+        
+        # Check if the file is empty
+        if os.path.getsize(output_path) == 0:
+            logger.error(f"Redacted file is empty: {output_path}")
+            flash('The redacted file is empty or corrupted', 'error')
             return redirect(url_for('index'))
         
         logger.info(f"Sending redacted file: {output_path}")
-        return send_file(output_path, as_attachment=True)
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name=output_filename,
+            mimetype='application/pdf'
+        )
+        
     except Exception as e:
         logger.exception("Download failed")
         flash(f'Download failed: {str(e)}', 'error')
@@ -209,6 +252,8 @@ def download():
             if 'output_path' in locals() and os.path.exists(output_path):
                 os.remove(output_path)
                 logger.info(f"Cleaned up redacted file: {output_path}")
+                # Clear the session
+                session.pop('output_filename', None)
         except Exception as e:
             logger.error(f"Failed to clean up redacted file: {e}")
 
