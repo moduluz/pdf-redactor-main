@@ -19,6 +19,18 @@ import pytesseract
 from langdetect import detect, DetectorFactory, detect_langs
 import cv2
 import numpy as np
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('pdf_redactor.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Make language detection deterministic
 DetectorFactory.seed = 0
@@ -162,121 +174,63 @@ class PDFRedactor:
         patterns = {
             "en": {
                 "phone": [
-                    r"\b(?:\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
+                    r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US/Canada
                     r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
-                    r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b"
+                    r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",
+                    r"\b(?:\+\d{1,3}[-.\s]?)?\d{1,4}[-.\s]?\d{2,4}[-.\s]?\d{4}\b"  # International
                 ],
-                "name": [r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b"],
-                "address": [
-                    r"\b\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Plaza|Plz|Terrace|Ter|Way)\b",
-                    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\b"
+                "email": [
+                    r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b",
+                    r"\b[a-zA-Z0-9._%+-]+(?:@|\[at\])[a-zA-Z0-9.-]+(?:\.|\[dot\])[a-zA-Z]{2,}\b"  # Handle obfuscated emails
                 ],
-                "email": [r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"],
-                "ssn": [r"\b\d{3}-\d{2}-\d{4}\b", r"\bSSN\s*:?\s*\d{3}[-]?\d{2}[-]?\d{4}\b"],
                 "credit_card": [
-                    r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                    r"\b\d{16}\b",
-                    r"\b\d{13}\b",
-                    r"\b\d{15}\b"
-                ]
-            },
-            "fr": {
-                "phone": [
-                    r"\b(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}\b",
-                    r"\b0\d[\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}\b"
+                    r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\d{3})\d{11})\b",  # Major card types
+                    r"\b(?:\d{4}[-\s]?){4}\b",  # Formatted with spaces/dashes
+                    r"\b\d{16}\b"  # Raw 16 digits
                 ],
-                "name": [r"\b[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+\s+[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+\b"],
-                "address": [
-                    r"\b\d+(?:,|\s+)(?:rue|avenue|boulevard|place|cours|chemin|impasse)\s+[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+(?:\s+[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+)*\b",
-                    r"\b\d{5}\s+[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+(?:\s+[A-ZÀÁÂÄÆÇÈÉÊËÌÍÎÏÑÒÓÔÖÙÚÛÜ][a-zàáâäæçèéêëìíîïñòóôöùúûü]+)*\b"
+                "cvv": [
+                    r"\b(?:CVV|CVC|CVV2|CID)[\s:]*\d{3,4}\b",
+                    r"\b(?:security code|card code)[\s:]*\d{3,4}\b",
+                    r"\b\d{3,4}(?=\s*(?:CVV|CVC|CVV2|CID))\b"
                 ],
-                "email": [r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"],
-                "ssn": [r"\b\d\s?\d{2}\s?\d{2}\s?\d{2}\s?\d{3}\s?\d{3}\s?\d{2}\b"], # French social security number
-                "credit_card": [
-                    r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                    r"\b\d{16}\b",
-                    r"\b\d{13}\b",
-                    r"\b\d{15}\b"
-                ]
-            },
-            "es": {
-                "phone": [
-                    r"\b(?:\+34|0034|34)?[\s-]?[6789]\d{8}\b",
-                    r"\b(?:\+34|0034|34)?[\s-]?[6789][\s-]?\d{2}[\s-]?\d{2}[\s-]?\d{2}[\s-]?\d{2}\b"
+                "expiration": [
+                    r"\b(?:0[1-9]|1[0-2])[-/](?:[0-9]{2}|2[0-9]{3})\b",  # MM/YY or MM/YYYY
+                    r"\b(?:0[1-9]|1[0-2])[-/](?:[0-9]{2})\b",  # MM/YY
+                    r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[,\s]+\d{4}\b"  # Month YYYY
                 ],
-                "name": [r"\b[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+\s+(?:[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+\s+)?[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+\b"],
-                "address": [
-                    r"\b(?:Calle|Avenida|Av\.|Plaza|Paseo|Camino)\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+)*,?\s+(?:n[úu]mero|nº|#)?\s*\d+\b",
-                    r"\b\d{5}\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+)*\b"
+                "iban": [
+                    r"\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]?){0,16}\b",
+                    r"\b(?:IBAN|International Bank Account Number)[\s:]*[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]?){0,16}\b"
                 ],
-                "email": [r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"],
-                "dni": [r"\b\d{8}[A-Z]\b"],  # Spanish national ID
-                "nie": [r"\b[XYZ]\d{7}[A-Z]\b"],  # Foreign resident ID
-                "credit_card": [
-                    r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                    r"\b\d{16}\b"
-                ]
-            },
-            "de": {
-                "phone": [
-                    r"\b(?:\+49|0049|0)?[\s-]?[1-9]\d{1,4}[\s-]?\d{4,8}\b",
-                    r"\b(?:\+49|0049|0)?[\s-]?[1-9]\d{1,2}[\s-]?\d{2,7}[\s-]?\d{2,8}\b"
+                "bic": [
+                    r"\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b",
+                    r"\b(?:BIC|SWIFT)[\s:]*[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b"
                 ],
-                "name": [r"\b[A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+\b"],
-                "address": [
-                    r"\b[A-ZÄÖÜ][a-zäöüß]+(?:straße|str\.|strasse|platz|weg|allee|gasse)\s+\d+[a-z]?\b",
-                    r"\b\d{5}\s+[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)*\b"
+                "aadhaar": [
+                    r"\b\d{4}\s?\d{4}\s?\d{4}\b",
+                    r"\b(?:Aadhaar|आधार)[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"
                 ],
-                "email": [r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"],
-                "steuer_id": [r"\b\d{2}\s?\d{3}\s?\d{3}\s?\d{3}\b"],  # German tax ID
-                "credit_card": [
-                    r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                    r"\b\d{16}\b",
-                    r"\b\d{13}\b",
-                    r"\b\d{15}\b"
+                "pan": [
+                    r"\b[A-Z]{5}\d{4}[A-Z]\b",
+                    r"\b(?:PAN|Permanent Account Number)[\s:]*[A-Z]{5}\d{4}[A-Z]\b"
                 ]
             },
             "hi": {
-                # Indian phone number formats
                 "phone": [
-                    r"\b(?:\+91[-\s]?)?[6789]\d{9}\b",  # Mobile numbers with/without +91
-                    r"\b0\d{2,4}[-\s]?\d{6,8}\b",       # Landline with STD codes
-                    r"\b\(\d{3,5}\)\s*\d{6,8}\b",       # Parenthesis format for STD
-                    r"\b\+91[-\s]?\d{2,5}[-\s]?\d{5,8}\b"  # International format
+                    r"\b(?:\+91[-\s]?)?[6789]\d{9}\b",
+                    r"\b0\d{2,4}[-\s]?\d{6,8}\b"
                 ],
-                # Aadhaar number (India's national ID)
                 "aadhaar": [
-                    r"\b\d{4}\s?\d{4}\s?\d{4}\b",       # Standard 12-digit Aadhaar
-                    r"\bआधार(?:\s+संख्या)?[:.\s]+\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"  # Prefixed with "Aadhaar" in Hindi
+                    r"\b\d{4}\s?\d{4}\s?\d{4}\b",
+                    r"\b(?:आधार|Aadhaar)[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
+                    r"\bUID[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"
                 ],
-                # Indian PAN card pattern (tax ID)
                 "pan": [
-                    r"\b[A-Z]{5}\d{4}[A-Z]\b",          # Standard PAN format
-                    r"\bPAN\s*[:.\s]+[A-Z]{5}\d{4}[A-Z]\b" # With PAN prefix
-                ],
-                # Indian bank account numbers & IFSC codes
-                "bank": [
-                    r"\b[A-Z]{4}0\d{6}\b",              # IFSC codes
-                    r"\b\d{9,18}\b",                    # Bank account numbers
-                    r"\b(?:खाता|अकाउंट)(?:\s+संख्या)?[:.\s]+\d{9,18}\b"  # Account prefixed in Hindi
-                ],
-                # Regular email pattern works for Hindi as well
-                "email": [r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"],
-                # Same credit card patterns
-                "credit_card": [
-                    r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                    r"\b\d{16}\b",
-                    r"\b\d{13}\b",
-                    r"\b\d{15}\b"
-                ],
-                # Indian postal code
-                "postal": [
-                    r"\b\d{6}\b",                       # 6-digit PIN code
-                    r"\b[A-Za-z]+,\s*[A-Za-z]+\s*-\s*\d{6}\b"  # City, State - PIN format
+                    r"\b[A-Z]{5}\d{4}[A-Z]\b",
+                    r"\b(?:पैन|PAN)[\s:]*[A-Z]{5}\d{4}[A-Z]\b"
                 ]
             }
         }
-        
         return patterns.get(language_code, patterns["en"])
 
     @staticmethod
@@ -335,158 +289,46 @@ class PDFRedactor:
         return matches
 
     def is_heading(self, text: str, config: RedactionConfig, language_code: str = "en") -> bool:
-        """Check if text is likely a heading or label, using language-specific patterns"""
-        # If preserve_headings is disabled, don't treat anything as a heading
+        """Enhanced heading detection with language support and common patterns"""
         if not config.preserve_headings:
             return False
-            
-        # Skip very long text - headings are typically short
-        if len(text) > 50:
-            return False
-            
-        # ALWAYS redact these sensitive items even if they look like headings
-        sensitive_patterns = [
-            # Credit card related - Enhanced patterns
-            r"CVV\s*:?\s*\d{3,4}",
-            r"CVC\s*:?\s*\d{3,4}",
-            r"CV2\s*:?\s*\d{3,4}",
-            r"Security Code\s*:?\s*\d{3,4}",
-            r"CSC\s*:?\s*\d{3,4}",  # Card Security Code
-            r"CID\s*:?\s*\d{3,4}",  # Card ID (used by AmEx)
-            r"\d{3,4}\s+\((?:CVV|CVC|CSC|CID)\)",
-            r"(?:\d{4}[- ]?){3}\d{4}",  # Credit card numbers with separators
-            r"\b\d{16}\b",  # Raw 16-digit numbers
-            r"\b\d{13}\b",  # Some cards have 13 digits
-            r"\b\d{15}\b",  # American Express format (15 digits)
-            r"\b4[0-9]{12}(?:[0-9]{3})?\b",  # Visa
-            r"\b5[1-5][0-9]{14}\b",  # MasterCard
-            r"\b3[47][0-9]{13}\b",  # American Express
-            r"\b3(?:0[0-5]|[68][0-9])[0-9]{11}\b",  # Diners Club
-            r"\b6(?:011|5[0-9]{2})[0-9]{12}\b",  # Discover
-            
-            # Other financial identifiers - Enhanced patterns
-            r"IBAN\s*:?\s*[A-Z]{2}[0-9]{2}[0-9A-Z]{10,30}",
-            r"BIC\s*:?\s*[A-Z0-9]{8,11}",
-            r"SWIFT\s*:?\s*[A-Z0-9]{8,11}",
-            r"Account\s*(?:Number|No|#)?\s*:?\s*\d+",
-            r"Routing\s*(?:Number|No|#)?\s*:?\s*\d+",
-            r"Sort\s*Code\s*:?\s*\d{2}[-]?\d{2}[-]?\d{2}",
-            
-            # Expiration related - Enhanced patterns
-            r"Expiry\s*:?\s*\d{1,2}[-/]\d{2,4}",
-            r"Expiration\s*:?\s*\d{1,2}[-/]\d{2,4}",
-            r"Exp\s*:?\s*\d{1,2}[-/]\d{2,4}",
-            r"Valid Thru\s*:?\s*\d{1,2}[-/]\d{2,4}",
-            r"Exp\. Date\s*:?\s*\d{1,2}[-/]\d{2,4}",
-            r"(?:0[1-9]|1[0-2])[-/](?:[0-9]{2}|2[0-9]{3})",  # MM/YY or MM/YYYY
-            
-            # Personal identifiers - Enhanced patterns
-            r"SSN\s*:?\s*\d{3}[-]?\d{2}[-]?\d{4}",
-            r"Social Security\s*:?\s*\d{3}[-]?\d{2}[-]?\d{4}",
-            r"\b\d{3}[-]?\d{2}[-]?\d{4}\b",  # Raw SSN format
-            r"Tax ID\s*:?\s*\d{2}[-]?\d{7}",
-            r"EIN\s*:?\s*\d{2}[-]?\d{7}",
-            r"Passport\s*:?\s*[A-Z0-9]{6,9}",
-            r"Driver'?s?\s*License\s*:?\s*[A-Z0-9]{6,12}",
-            r"ID\s*(?:Number|No|#)?\s*:?\s*[A-Z0-9]{6,12}",
-            
-            # Phone numbers - Enhanced patterns
-            r"Phone\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-            r"Mobile\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-            r"Cell\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-            r"Telephone\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-            r"Tel\s*:?\s*(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}",
-            r"\b\+?\d{1,3}[-\.\s]?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}\b",  # Generic international format
-            r"\b\d{3}[-\.\s]?\d{3}[-\.\s]?\d{4}\b",  # US format without country code
-            
-            # Email addresses - Enhanced patterns
-            r"Email\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-            r"E-mail\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-            r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b",  # Raw email format
-            r"\b[a-zA-Z0-9._%+-]+\s*(?:@|\[at\])\s*[a-zA-Z0-9.-]+\s*(?:\.|\[dot\])\s*[a-zA-Z]{2,}\b",  # Obfuscated email
+
+        # Get language-specific heading patterns
+        lang_patterns = self.LANGUAGE_HEADING_PATTERNS.get(language_code, self.LANGUAGE_HEADING_PATTERNS["en"])
+        
+        # Common heading indicators
+        common_indicators = [
+            r"^(?:[A-Z][a-z]*\s*)+:",  # Capitalized words followed by colon
+            r"^[IVX]{1,5}\.?\s+.*$",   # Roman numerals
+            r"^\d+\.[\d.]*\s+.*$",      # Numbered headings (1., 1.1., etc.)
+            r"^[A-Z\s]{2,}(?::|$)",     # ALL CAPS text
+            r"^(?:Section|Chapter|Part|Article)\s+\d+",  # Common document sections
+            r"^[A-Z][a-z]+\s+\d+",      # Word + number (Page 1, Section 2)
+            r"^[-•*]\s+[A-Z]",          # Bullet points with capital letters
+            r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*[:-]"  # Title Case followed by colon or dash
         ]
         
-        # Language-specific sensitive patterns
-        language_sensitive_patterns = {
-            "fr": [
-                r"Téléphone\s*:?\s*(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}",
-                r"Portable\s*:?\s*(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}",
-                r"Courriel\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-                r"E-mail\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-                r"Numéro de Sécurité Sociale\s*:?\s*\d\s?\d{2}\s?\d{2}\s?\d{2}\s?\d{3}\s?\d{3}\s?\d{2}",
-                r"Carte Bleue\s*:?\s*(?:\d{4}[- ]?){3}\d{4}",
-                r"N° CB\s*:?\s*(?:\d{4}[- ]?){3}\d{4}",
-                r"Cryptogramme\s*:?\s*\d{3,4}"
-            ],
-            "es": [
-                r"Teléfono\s*:?\s*(?:\+34|0034|34)?[\s-]?[6789]\d{8}",
-                r"Móvil\s*:?\s*(?:\+34|0034|34)?[\s-]?[6789]\d{8}",
-                r"Correo Electrónico\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-                r"E-mail\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-                r"DNI\s*:?\s*\d{8}[A-Z]",
-                r"NIE\s*:?\s*[XYZ]\d{7}[A-Z]",
-                r"Tarjeta de Crédito\s*:?\s*(?:\d{4}[- ]?){3}\d{4}",
-                r"Código de Seguridad\s*:?\s*\d{3,4}"
-            ],
-            "de": [
-                r"Telefon\s*:?\s*(?:\+49|0049|0)?[\s-]?[1-9]\d{1,4}[\s-]?\d{4,8}",
-                r"Handy\s*:?\s*(?:\+49|0049|0)?[\s-]?[1-9]\d{1,4}[\s-]?\d{4,8}",
-                r"E-Mail\s*:?\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
-                r"Steuer-ID\s*:?\s*\d{2}\s?\d{3}\s?\d{3}\s?\d{3}",
-                r"Kreditkarte\s*:?\s*(?:\d{4}[- ]?){3}\d{4}",
-                r"Prüfnummer\s*:?\s*\d{3,4}"
-            ]
-        }
-        
-        # Add language-specific sensitive patterns if available
-        if language_code in language_sensitive_patterns:
-            sensitive_patterns.extend(language_sensitive_patterns[language_code])
-        
-        # If the text matches any sensitive pattern, it's NOT a heading (should be redacted)
-        for pattern in sensitive_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return False
-                
-        # Special case - handle label-value pairs
-        # Try to identify if this is a label with sensitive content
-        label_value_match = re.match(r"^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s*:)\s*(.+)$", text.strip())
-        if label_value_match:
-            label, value = label_value_match.groups()
-            
-            # Check if the value part contains sensitive information
-            value_tests = [
-                # Check for credit card patterns in the value
-                lambda v: bool(re.search(r"(?:\d{4}[- ]?){3}\d{4}", v)),
-                lambda v: bool(re.search(r"\b\d{13,16}\b", v)),
-                # Check for SSN pattern
-                lambda v: bool(re.search(r"\d{3}[-]?\d{2}[-]?\d{4}", v)),
-                # Check for phone number patterns
-                lambda v: bool(re.search(r"(?:\+\d{1,3}[-\.\s]?)?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}", v)),
-                # Check for email pattern
-                lambda v: bool(re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", v)),
-                # Check for date patterns that might be expiration dates
-                lambda v: bool(re.search(r"\d{1,2}/\d{2,4}", v)),
-                # Check for account numbers
-                lambda v: bool(re.search(r"\b\d{8,17}\b", v)),
-            ]
-            
-            # If any test returns True, we should redact this text
-            if any(test(value) for test in value_tests):
-                return False
-                
-        # Check against language-specific heading patterns if available
-        if language_code in self.LANGUAGE_HEADING_PATTERNS:
-            for pattern in self.LANGUAGE_HEADING_PATTERNS[language_code]:
-                if re.match(pattern, text.strip()):
-                    return True
-                    
-        # Fall back to default heading patterns
-        for pattern in self.HEADING_PATTERNS:
+        # Check common patterns first
+        for pattern in common_indicators:
             if re.match(pattern, text.strip()):
                 return True
-                
-        # Check for common label formats (e.g., "Name:", "Email:", etc.)
-        if re.match(r"^[A-Z][a-z]+\s*:", text.strip()):
+        
+        # Check language-specific patterns
+        for pattern in lang_patterns:
+            if re.match(pattern, text.strip()):
+                return True
+        
+        # Check for common heading words
+        heading_words = {
+            "en": ["summary", "introduction", "conclusion", "overview", "background", "objectives", "methodology", "results", "discussion", "recommendations"],
+            "hi": ["सारांश", "परिचय", "निष्कर्ष", "पृष्ठभूमि", "उद्देश्य", "कार्यप्रणाली", "परिणाम", "चर्चा", "सिफारिशें"],
+            "fr": ["résumé", "introduction", "conclusion", "aperçu", "contexte", "objectifs", "méthodologie", "résultats", "discussion", "recommandations"],
+            "de": ["zusammenfassung", "einleitung", "schlussfolgerung", "überblick", "hintergrund", "ziele", "methodik", "ergebnisse", "diskussion", "empfehlungen"],
+            "es": ["resumen", "introducción", "conclusión", "visión general", "antecedentes", "objetivos", "metodología", "resultados", "discusión", "recomendaciones"]
+        }
+        
+        words = text.lower().split()
+        if words and words[0] in heading_words.get(language_code, heading_words["en"]):
             return True
             
         return False
@@ -626,336 +468,231 @@ class PDFRedactor:
             print("[Error] Invalid input. Please enter 'Y' to continue or 'n' to abort.")
 
     def redact_images(self, pdf_document: fitz.Document, config: RedactionConfig) -> List[Dict]:
-        """Redact sensitive information from images in the PDF"""
+        """Enhanced image redaction with better detection and handling"""
+        redacted_images = []
+        
         if not tesseract_installed:
-            print("\n[Error] Tesseract OCR is not installed. Cannot perform image-based redaction.")
-            print("[i] Install Tesseract OCR from: https://github.com/UB-Mannheim/tesseract/wiki")
-            print("[i] Make sure to check 'Add to PATH' during installation.")
+            logger.error("Tesseract OCR is not installed. Cannot perform image-based redaction.")
+            logger.info("Install Tesseract OCR from: https://github.com/UB-Mannheim/tesseract/wiki")
+            logger.info("Make sure to check 'Add to PATH' during installation.")
             return []
-        
-        try:
-            import cv2
-            import numpy as np
-            has_cv2 = True
-            # Load face detection cascade
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            if face_cascade.empty():
-                print("[Warning] Could not load face cascade classifier")
-                has_cv2 = False
-        except ImportError:
-            print("\n[Warning] OpenCV (cv2) not found. Face detection will be limited.")
-            has_cv2 = False
-        
-        print("\n[i] Searching for text and personal images...")
-        image_redaction_info = []
         
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
+            image_list = page.get_images(full=True)
             
-            try:
-                # Get all images on the page
+            for img_idx, img in enumerate(image_list):
+                try:
+                    xref = img[0]
+                    base_image = pdf_document.extract_image(xref)
+                    
+                    if base_image:
+                        image_bytes = base_image["image"]
+                        image_ext = base_image["ext"]
+                        
+                        # Convert image bytes to numpy array
+                        nparr = np.frombuffer(image_bytes, np.uint8)
+                        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        
+                        if image is not None:
+                            # Detect faces using multiple cascades for better accuracy
+                            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                            profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+                            
+                            if face_cascade.empty() or profile_cascade.empty():
+                                logger.warning("Could not load face cascade classifiers")
+                                continue
+                            
+                            # Convert to grayscale for detection
+                            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                            
+                            # Detect faces (both frontal and profile)
+                            faces_frontal = face_cascade.detectMultiScale(gray, 1.3, 5)
+                            faces_profile = profile_cascade.detectMultiScale(gray, 1.3, 5)
+                            
+                            # Combine detected faces
+                            faces = list(faces_frontal) + list(faces_profile)
+                            
+                            if len(faces) > 0:
+                                logger.info(f"Found {len(faces)} faces in image on page {page_num + 1}")
+                                # Apply redaction to detected faces
+                                for (x, y, w, h) in faces:
+                                    try:
+                                        if config.use_blur:
+                                            # Apply Gaussian blur
+                                            roi = image[y:y+h, x:x+w]
+                                            blurred = cv2.GaussianBlur(roi, (99, 99), 30)
+                                            image[y:y+h, x:x+w] = blurred
+                                        else:
+                                            # Apply solid color redaction
+                                            cv2.rectangle(image, (x, y), (x+w, y+h), self.color_map[config.color], -1)
+                                    except Exception as e:
+                                        logger.error(f"Failed to apply redaction to face: {str(e)}")
+                                
+                                # Convert back to bytes
+                                success, img_bytes = cv2.imencode(f'.{image_ext}', image)
+                                if success:
+                                    try:
+                                        # Replace the image in the PDF
+                                        pdf_document.delete_image(xref)
+                                        pdf_document.insert_image(
+                                            page.get_images(full=True)[img_idx][1],  # Use original rectangle
+                                            stream=img_bytes.tobytes(),
+                                            filter=base_image.get("filter")
+                                        )
+                                        
+                                        redacted_images.append({
+                                            'page': page_num + 1,
+                                            'faces_found': len(faces),
+                                            'status': 'success'
+                                        })
+                                        logger.info(f"Successfully redacted faces in image on page {page_num + 1}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to replace image in PDF: {str(e)}")
+                                else:
+                                    logger.error("Failed to encode redacted image")
+                            
+                            # Perform OCR to detect text in images
+                            if tesseract_installed:
+                                try:
+                                    text = pytesseract.image_to_string(image)
+                                    if text.strip():
+                                        # Search for sensitive information in the text
+                                        sensitive_found = False
+                                        
+                                        # Check for various patterns
+                                        patterns = {
+                                            'phone': r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',
+                                            'email': r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',
+                                            'credit_card': r'\b(?:\d{4}[-\s]?){4}\b',
+                                            'aadhaar': r'\b\d{4}\s?\d{4}\s?\d{4}\b',
+                                            'pan': r'\b[A-Z]{5}\d{4}[A-Z]\b'
+                                        }
+                                        
+                                        for pattern_type, pattern in patterns.items():
+                                            if re.search(pattern, text):
+                                                sensitive_found = True
+                                                logger.info(f"Found sensitive {pattern_type} in image text on page {page_num + 1}")
+                                                break
+                                        
+                                        if sensitive_found:
+                                            try:
+                                                # Apply full image redaction for sensitive text
+                                                if config.use_blur:
+                                                    image = cv2.GaussianBlur(image, (99, 99), 30)
+                                                else:
+                                                    image.fill(self.color_map[config.color][0] * 255)
+                                                
+                                                # Convert back to bytes and replace
+                                                success, img_bytes = cv2.imencode(f'.{image_ext}', image)
+                                                if success:
+                                                    pdf_document.delete_image(xref)
+                                                    pdf_document.insert_image(
+                                                        page.get_images(full=True)[img_idx][1],
+                                                        stream=img_bytes.tobytes(),
+                                                        filter=base_image.get("filter")
+                                                    )
+                                                    
+                                                    redacted_images.append({
+                                                        'page': page_num + 1,
+                                                        'sensitive_text_found': True,
+                                                        'status': 'success'
+                                                    })
+                                                    logger.info(f"Successfully redacted sensitive text in image on page {page_num + 1}")
+                                            except Exception as e:
+                                                logger.error(f"Failed to redact sensitive text in image: {str(e)}")
+                                except Exception as e:
+                                    logger.warning(f"OCR failed for image on page {page_num + 1}: {str(e)}")
+                
+                except Exception as e:
+                    logger.error(f"Failed to process image on page {page_num + 1}: {str(e)}")
+                    redacted_images.append({
+                        'page': page_num + 1,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
+        
+        return redacted_images
+
+    def verify_redaction(self, redacted_pdf_path: Path, sensitive_patterns: List[str]) -> bool:
+        """Enhanced verification of redaction effectiveness"""
+        try:
+            # Open the redacted PDF
+            pdf_document = fitz.open(str(redacted_pdf_path))
+            verification_results = {'success': True, 'issues': []}
+            
+            for page_num in range(len(pdf_document)):
+                page = pdf_document[page_num]
+                
+                # Get both text and words to handle different text extraction methods
+                text = page.get_text()
+                words = page.get_text("words")
+                
+                # Check for sensitive patterns in continuous text
+                for pattern in sensitive_patterns:
+                    matches = re.finditer(pattern, text)
+                    for match in matches:
+                        verification_results['success'] = False
+                        verification_results['issues'].append({
+                            'page': page_num + 1,
+                            'type': 'unredacted_text',
+                            'pattern': pattern,
+                            'context': text[max(0, match.start()-20):match.end()+20]
+                        })
+                
+                # Check individual words for partial matches
+                for word in words:
+                    word_text = word[4]  # The actual text content
+                    for pattern in sensitive_patterns:
+                        if re.search(pattern, word_text):
+                            verification_results['success'] = False
+                            verification_results['issues'].append({
+                                'page': page_num + 1,
+                                'type': 'unredacted_word',
+                                'pattern': pattern,
+                                'text': word_text
+                            })
+                
+                # Check for potentially unredacted images
                 image_list = page.get_images(full=True)
-                if not image_list:
-                    continue
-                
-                print(f" |  Processing {len(image_list)} images on Page {page_num + 1}")
-                
-                # Get page dimensions
-                page_rect = page.rect
-                
-                # Get all image blocks on the page
-                image_blocks = []
-                for block in page.get_text("dict")["blocks"]:
-                    if block.get("type") == 1:  # Type 1 is image
-                        image_blocks.append(block)
-                
-                for img_index, img in enumerate(image_list):
+                for img_idx, img in enumerate(image_list):
                     try:
                         xref = img[0]
                         base_image = pdf_document.extract_image(xref)
-                        image_bytes = base_image["image"]
                         
-                        # Convert to PIL Image
-                        pil_image = Image.open(io.BytesIO(image_bytes))
-                        width, height = pil_image.size
-                        
-                        # Convert to numpy array for OpenCV processing
-                        if has_cv2:
-                            cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-                            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-                        
-                        # Check for faces if OpenCV is available
-                        has_face = False
-                        if has_cv2:
-                            try:
-                                # Detect faces with different scale factors for better accuracy
-                                scale_factors = [1.1, 1.2, 1.3]
-                                min_neighbors_values = [3, 4, 5]
-                                
-                                for scale_factor in scale_factors:
-                                    for min_neighbors in min_neighbors_values:
-                                        faces = face_cascade.detectMultiScale(
-                                            gray,
-                                            scaleFactor=scale_factor,
-                                            minNeighbors=min_neighbors,
-                                            minSize=(20, 20)
-                                        )
-                                        if len(faces) > 0:
-                                            has_face = True
-                                            print(f" |  Found {len(faces)} face(s) in image {img_index+1} on Page {page_num+1}")
-                                            break
-                                    if has_face:
-                                        break
-                            except Exception as e:
-                                print(f" |  Error during face detection: {e}")
-                        
-                        # Check image dimensions for potential passport/ID photos
-                        aspect_ratio = width / height
-                        is_potential_id = (
-                            (width <= 800 and height <= 1000) and  # Common passport/ID photo size
-                            (0.6 <= aspect_ratio <= 1.0)  # Common passport/ID photo aspect ratio
-                        )
-                        
-                        # Try OCR for text-based sensitive info
-                        text = pytesseract.image_to_string(pil_image)
-                        
-                        # Additional OCR for high-res images
-                        if width > 1000 or height > 1000:
-                            text_hq = pytesseract.image_to_string(
-                                pil_image,
-                                config='--oem 1 --psm 3 -c preserve_interword_spaces=1'
-                            )
-                            text += "\n" + text_hq
-                        
-                        # Check for sensitive information
-                        found_sensitive = False
-                        found_types = []
-                        
-                        # Add face detection result
-                        if has_face:
-                            found_sensitive = True
-                            found_types.append("Face Detected")
-                        
-                        # Add potential ID photo detection
-                        if is_potential_id:
-                            found_sensitive = True
-                            found_types.append("Potential ID Photo")
-                        
-                        # Check for phone numbers
-                        if config.redact_phone:
-                            phone_patterns = [
-                                r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
-                                r"\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b"
-                            ]
-                            for pattern in phone_patterns:
-                                if re.search(pattern, text):
-                                    found_sensitive = True
-                                    found_types.append("Phone Numbers")
-                                    break
-                        
-                        # Check for email addresses
-                        if config.redact_email:
-                            email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                            if re.search(email_pattern, text):
-                                found_sensitive = True
-                                found_types.append("Email Addresses")
-                        
-                        if found_sensitive:
-                            print(f" |  Found sensitive information in image {img_index+1} on Page {page_num+1}: {', '.join(found_types)}")
+                        if base_image:
+                            # Convert image to numpy array
+                            image_bytes = base_image["image"]
+                            nparr = np.frombuffer(image_bytes, np.uint8)
+                            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                             
-                            # Try to find the image block that matches this image
-                            image_rect = None
-                            if img_index < len(image_blocks):
-                                block = image_blocks[img_index]
-                                image_rect = fitz.Rect(block["bbox"])
-                            
-                            # If we found a rectangle, apply redaction
-                            if image_rect and image_rect.is_valid and not image_rect.is_empty:
-                                try:
-                                    # Create redaction annotation
-                                    annot = page.add_redact_annot(
-                                        image_rect,
-                                        text="[REDACTED IMAGE]" if config.use_blur else None,
-                                        fill=self.COLORS[config.color]
-                                    )
-                                    
-                                    # Apply the redaction
-                                    page.apply_redactions()
-                                    
-                                    # Record redaction info
-                                    image_redaction_info.append({
-                                        "page": page_num + 1,
-                                        "image_index": img_index + 1,
-                                        "types": found_types,
-                                        "dimensions": f"{width}x{height}"
-                                    })
-                                    
-                                    print(f" |  Successfully redacted image {img_index+1} on Page {page_num+1}")
-                                except Exception as e:
-                                    print(f" |  Error applying redaction to image {img_index+1} on Page {page_num+1}: {e}")
-                            else:
-                                print(f" |  Could not determine location of image {img_index+1} on Page {page_num+1}")
-                    
+                            if image is not None and tesseract_installed:
+                                # Perform OCR on the image
+                                text = pytesseract.image_to_string(image)
+                                
+                                # Check for sensitive information in the OCR text
+                                for pattern in sensitive_patterns:
+                                    if re.search(pattern, text):
+                                        verification_results['success'] = False
+                                        verification_results['issues'].append({
+                                            'page': page_num + 1,
+                                            'type': 'unredacted_image_text',
+                                            'pattern': pattern
+                                        })
                     except Exception as e:
-                        print(f" |  Error processing image {img_index+1} on Page {page_num+1}: {e}")
+                        logger.warning(f"Failed to verify image on page {page_num + 1}: {str(e)}")
             
-            except Exception as e:
-                print(f" |  Error getting images from Page {page_num+1}: {e}")
-        
-        return image_redaction_info
-
-    def verify_redaction(self, redacted_pdf_path: Path, sensitive_patterns: List[str]) -> bool:
-        """Verify that all sensitive information has been properly redacted"""
-        print("\n[i] Verifying redaction...")
-        doc = self.load_pdf(redacted_pdf_path)
-        text_pages = self.ocr_pdf(doc)
-        all_text = " ".join(text_pages)
-        
-        found_sensitive_info = False
-        pattern_matches = {}
-        
-        # Organize patterns into categories for better reporting
-        pattern_categories = {
-            "Credit Card Numbers": [
-                r"\b(?:\d{4}[- ]?){3}\d{4}\b",
-                r"\b\d{16}\b",
-                r"\b\d{13}\b",
-                r"\b\d{15}\b",
-                r"\b(?:4\d{12}(?:\d{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\d{3})\d{11})\b"
-            ],
-            "CVV/CVC Codes": [
-                r"\b(?:cvv|cvc|cvv2|cvc2|security\s+code|card\s+security\s+code|verification\s+code|security\s+number)[:.\s]+(\d{3,4})\b",
-                r"\b(\d{3,4})\s*\((?:cvv|cvc|security\s+code)\)",
-                r"\b(?:cvv|cvc|security)\s*(?:number|code|verification)?\s*[:.\s]+(\d{3,4})\b"
-            ],
-            "Expiration Dates": [
-                r"\bExpiry\s*:?\s*\d{1,2}/\d{2,4}\b",
-                r"\bExpiration\s*:?\s*\d{1,2}/\d{2,4}\b",
-                r"\bExp\s*:?\s*\d{1,2}/\d{2,4}\b",
-                r"\bValid Thru\s*:?\s*\d{1,2}/\d{2,4}\b",
-                r"\bExp\.\s*Date\s*:?\s*\d{1,2}/\d{2,4}\b"
-            ],
-            "Phone Numbers": [
-                r"\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
-                r"\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b",
-                r"\b(?:phone|tel|telephone|mobile|cell|contact)[:.\s]+(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b"
-            ],
-            "Email Addresses": [
-                r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-            ]
-        }
-        
-        page_results = {}
-        
-        for page_num, page_text in enumerate(text_pages):
-            page_results[page_num + 1] = {}
+            # Store verification results in the report
+            self.report_data['verification_results'] = verification_results
             
-            for category, patterns in pattern_categories.items():
-                category_matches = []
-                for pattern in patterns:
-                    matches = re.findall(pattern, page_text, re.IGNORECASE | re.MULTILINE)
-                    if matches:
-                        for match in matches:
-                            # Skip if it looks like a year (e.g., 2023)
-                            if re.match(r"\b(?:19|20)\d{2}\b", str(match)):
-                                continue
-                                
-                            # Skip if it looks like a page number or section number
-                            if re.match(r"\b[1-9]\d{0,3}\b", str(match)):
-                                continue
-                                
-                            category_matches.append(match)
-                
-                if category_matches:
-                    found_sensitive_info = True
-                    unique_matches = list(set(category_matches))
-                    page_results[page_num + 1][category] = unique_matches
-                    
-                    # Add to overall pattern matches
-                    cat_key = f"{category} (Page {page_num + 1})"
-                    pattern_matches[cat_key] = unique_matches
-        
-        # Also check images if Tesseract is available
-        if tesseract_installed:
-            print("[i] Checking images for sensitive information...")
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                images = page.get_images(full=True)
-                
-                for img_index, img_info in enumerate(images):
-                    try:
-                        xref = img_info[0]
-                        base_image = doc.extract_image(xref)
-                        image_bytes = base_image["image"]
-                        pil_image = Image.open(io.BytesIO(image_bytes))
-                        
-                        # Try multiple OCR approaches for better accuracy
-                        text = pytesseract.image_to_string(pil_image)
-                        
-                        # Try with better settings for high-res images
-                        if pil_image.width > 1000 or pil_image.height > 1000:
-                            text_hq = pytesseract.image_to_string(
-                                pil_image, 
-                                config='--oem 1 --psm 3 -c preserve_interword_spaces=1'
-                            )
-                            text += "\n" + text_hq
-                        
-                        if text.strip():
-                            for category, patterns in pattern_categories.items():
-                                category_matches = []
-                                for pattern in patterns:
-                                    matches = re.findall(pattern, text, re.IGNORECASE | re.MULTILINE)
-                                    if matches:
-                                        category_matches.extend(matches)
-                                
-                                if category_matches:
-                                    found_sensitive_info = True
-                                    unique_matches = list(set(category_matches))
-                                    cat_key = f"Image-{page_num+1}-{img_index+1}: {category}"
-                                    pattern_matches[cat_key] = unique_matches
-                                    
-                                    # Add to page results for consolidated reporting
-                                    if page_num + 1 not in page_results:
-                                        page_results[page_num + 1] = {}
-                                    
-                                    img_cat_key = f"{category} (Image)"
-                                    if img_cat_key not in page_results[page_num + 1]:
-                                        page_results[page_num + 1][img_cat_key] = []
-                                    
-                                    page_results[page_num + 1][img_cat_key].extend(unique_matches)
-                    except Exception as e:
-                        print(f" |  Error checking image {img_index+1} on Page {page_num+1}: {e}")
-        
-        # Reporting
-        if not found_sensitive_info:
-            print("\n[SUCCESS] No sensitive information detected in the redacted document.")
-            return True
-        else:
-            print("\n[FAILURE] Redaction verification failed - sensitive information still present:")
-            print("=" * 80)
+            return verification_results['success']
             
-            # Organized report by page
-            print("DETAILED REPORT BY PAGE:")
-            for page_num in sorted(page_results.keys()):
-                if page_results[page_num]:
-                    print(f"\nPAGE {page_num}:")
-                    print("-" * 40)
-                    for category, matches in page_results[page_num].items():
-                        print(f"  {category}: {len(matches)} match(es)")
-                        for i, match in enumerate(matches[:3]):  # Show first 3
-                            print(f"    - {match}")
-                        if len(matches) > 3:
-                            print(f"    ... and {len(matches)-3} more")
-            
-            print("\n" + "=" * 80)
-            print("RECOMMENDATIONS:")
-            print("1. Try running the redaction again with --no-preserve-headings flag")
-            print("2. Add specific patterns for the types of sensitive data found")
-            print("3. Use --verify after redaction to confirm all sensitive data is removed")
-            print("4. For stubborn text in images, try --redact-images option")
-            print("=" * 80)
-            
+        except Exception as e:
+            logger.error(f"Verification failed: {str(e)}")
             return False
+        finally:
+            if 'pdf_document' in locals():
+                pdf_document.close()
 
     def process_file(self, filepath: Path, config: RedactionConfig) -> None:
         """Process a single PDF file"""
@@ -1543,659 +1280,337 @@ class PDFRedactor:
             raise
 
     def find_phone_matches(self, page, page_num):
-        """Find matches for phone numbers"""
-        print(f"\n[i] Searching for Phone Numbers...")
+        """Find phone number matches in the page"""
+        phone_patterns = [
+            r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US/Canada
+            r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
+            r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",
+            r"\b(?:\+\d{1,3}[-.\s]?)?\d{1,4}[-.\s]?\d{2,4}[-.\s]?\d{4}\b",  # International
+            r"\b(?:\+91[-\s]?)?[6789]\d{9}\b",  # Indian mobile
+            r"\b0\d{2,4}[-\s]?\d{6,8}\b"  # Indian landline
+        ]
         
-        # Get the page text
+        matches = []
         text = page.get_text()
         
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
+        for pattern in phone_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                if not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        # Phone number patterns - More precise to avoid false positives
-        patterns = [
-            # US/Canada format with various separators - must have common phone prefixes
-            r"\b(?:Phone|Tel|Mobile|Cell|Contact|Call|Fax)?\s*(?::|#|number|is|at)?\s*(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
-            
-            # International format with + prefix
-            r"\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b",
-            
-            # Common phone number labels with numbers
-            r"\b(?:phone|tel|telephone|mobile|cell|fax|work|home|office)[:.\s]+(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
-            
-            # Extension formats
-            r"\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})(?:[-.\s]?(?:ext|x|extension)[-.\s]?\d{1,5})?\b"
-        ]
-        
-        # Skip patterns that look like credit card numbers
-        skip_patterns = [
-            r"\b(?:\d{4}[-\s]?){4}\b",  # 16 digits with separators
-            r"\b\d{16}\b",               # 16 digits without separators
-            r"\b\d{13}\b",               # 13 digits
-            r"\b\d{15}\b",               # 15 digits
-            r"\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|3(?:0[0-5]|[68]\d)\d{11}|6(?:011|5\d{2})\d{12})\b"  # Card issuer patterns
-        ]
-        
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Skip if it matches a credit card pattern
-                is_credit_card = any(re.search(cc_pattern, match_text) for cc_pattern in skip_patterns)
-                if is_credit_card:
-                    continue
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Skip if it looks like a year (e.g., 2023)
-                if re.match(r"\b(?:19|20)\d{2}\b", match_text):
-                    continue
-                    
-                # Skip if it looks like a page number or section number
-                if re.match(r"\b[1-9]\d{0,3}\b", match_text):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "Phone Number",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
-        
-        print(f"[i] Found {len(redactions)} phone number matches on page {page_num + 1}")
-        return redactions
+        return matches
 
     def find_email_matches(self, page, page_num):
-        """Find matches for email addresses"""
-        print(f"\n[i] Searching for Email Addresses...")
-        
-        # Get the page text
-        text = page.get_text()
-        
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
-        
-        # Standard email pattern
-        patterns = [
-            # Basic email pattern
-            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
-            
-            # Email with common prefixes/labels
-            r'\b(email|e-mail|mail)[:.\s]+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b',
-            
-            # Obfuscated emails (with "at" and "dot")
-            r'\b[A-Za-z0-9._%+-]+\s+at\s+[A-Za-z0-9.-]+\s+dot\s+[A-Z|a-z]{2,}\b'
+        """Find email address matches in the page"""
+        email_patterns = [
+            r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b",
+            r"\b[a-zA-Z0-9._%+-]+(?:@|\[at\])[a-zA-Z0-9.-]+(?:\.|\[dot\])[a-zA-Z]{2,}\b"  # Handle obfuscated emails
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("email", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        matches = []
+        text = page.get_text()
         
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Extract actual email if it's in a labeled format
-                if ":" in match_text and "@" in match_text:
-                    parts = match_text.split(":")
-                    for part in parts:
-                        if "@" in part:
-                            match_text = part.strip()
-                            break
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "Email Address",
-                        "match": match_text,
-                        "rect": inst,  # Rectangle coordinates of the match
-                        "quads": [inst.quad],  # Convert rect to quad for more precise redaction
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)  # Replace with asterisks for blur effect
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
+        for pattern in email_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                if not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        print(f"[i] Found {len(redactions)} email address matches on page {page_num + 1}")
-        return redactions
+        return matches
 
     def find_credit_card_matches(self, page, page_num):
-        """Find matches for credit card numbers"""
-        print(f"\n[i] Searching for Credit Card Numbers...")
+        """Find credit card number matches in the page"""
+        cc_patterns = [
+            r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\d{3})\d{11})\b",  # Major card types
+            r"\b(?:\d{4}[-\s]?){4}\b",  # Formatted with spaces/dashes
+            r"\b\d{16}\b"  # Raw 16 digits
+        ]
         
-        # Get the page text
+        matches = []
         text = page.get_text()
         
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
+        for pattern in cc_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                # Validate using Luhn algorithm
+                card_number = re.sub(r'[-\s]', '', match.group())
+                if self.is_valid_credit_card(card_number) and not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        # Credit card patterns for major card providers
-        patterns = [
-            # Visa: 13 or 16 digits starting with 4
-            r"\b4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            r"\b4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{1,4}\b",
-            
-            # Mastercard: 16 digits starting with 51-55 or 2221-2720
-            r"\b5[1-5]\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            r"\b2[2-7][2-7]\d[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            
-            # American Express: 15 digits starting with 34 or 37
-            r"\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b",
-            
-            # Discover: 16 digits starting with 6011, 622126-622925, 644-649, or 65
-            r"\b6011[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            r"\b65\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            r"\b64[4-9]\d[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
-            
-            # Common labels with credit card numbers
-            r"\b(?:credit\s+card|card\s+number|cc\s+number|cc\s*#|card\s*#)[:.\s]+(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b",
-            r"\b(?:visa|mastercard|amex|discover)[:.\s]+(\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4})\b"
-        ]
+        return matches
+
+    @staticmethod
+    def is_valid_credit_card(card_number):
+        """Validate credit card number using Luhn algorithm"""
+        def digits_of(n):
+            return [int(d) for d in str(n)]
         
-        # Skip patterns that look like phone numbers
-        skip_patterns = [
-            r"\b\+?\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # Standard phone format
-            r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",  # (123) 456-7890
-            r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"   # 123-456-7890
-        ]
-        
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Skip if it matches a phone number pattern
-                is_phone = any(re.search(phone_pattern, match_text) for phone_pattern in skip_patterns)
-                if is_phone:
-                    continue
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "Credit Card Number",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
-        
-        print(f"[i] Found {len(redactions)} credit card matches on page {page_num + 1}")
-        return redactions
+        digits = digits_of(card_number)
+        odd_digits = digits[-1::-2]
+        even_digits = digits[-2::-2]
+        checksum = sum(odd_digits)
+        for d in even_digits:
+            checksum += sum(digits_of(d * 2))
+        return checksum % 10 == 0
 
     def find_cvv_matches(self, page, page_num):
-        """Find matches for CVV/CVC security codes"""
-        print(f"\n[i] Searching for CVV/CVC Codes...")
-        
-        # Get the page text
-        text = page.get_text()
-        
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
-        
-        # CVV/CVC patterns - More precise to avoid false positives
-        patterns = [
-            # Common CVV/CVC patterns with labels
-            r"\b(?:cvv|cvc|cvv2|cvc2|security\s+code|card\s+security\s+code|verification\s+code|security\s+number)[:.\s]+(\d{3,4})\b",
-            
-            # CVV/CVC with parentheses
-            r"\b(\d{3,4})\s*\((?:cvv|cvc|security\s+code)\)",
-            
-            # CVV/CVC near credit card numbers (within reasonable distance)
-            r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\s+(?:cvv|cvc|security\s+code)?[:.\s]*(\d{3,4})\b",
-            
-            # Labeled CVV/CVC in various formats
-            r"\b(?:cvv|cvc|security)\s*(?:number|code|verification)?\s*[:.\s]+(\d{3,4})\b"
+        """Find CVV/CVC code matches in the page"""
+        cvv_patterns = [
+            r"\b(?:CVV|CVC|CVV2|CID)[\s:]*\d{3,4}\b",
+            r"\b(?:security code|card code)[\s:]*\d{3,4}\b",
+            r"\b\d{3,4}(?=\s*(?:CVV|CVC|CVV2|CID))\b"
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("cvv", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        matches = []
+        text = page.get_text()
         
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                # Check if we have a pattern with capture groups
-                if "(" in pattern and len(match.groups()) > 0:
-                    # Use the first capture group for the CVV digits
-                    match_text = match.group(1)
-                else:
-                    match_text = match.group(0)
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Skip if it looks like a year (e.g., 2023)
-                if re.match(r"\b(?:19|20)\d{2}\b", match_text):
-                    continue
-                    
-                # Skip if it looks like a page number or section number
-                if re.match(r"\b[1-9]\d{0,2}\b", match_text):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "CVV/CVC Code",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
+        for pattern in cvv_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                if not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        print(f"[i] Found {len(redactions)} CVV/CVC matches on page {page_num + 1}")
-        return redactions
+        return matches
 
     def find_cc_expiration_matches(self, page, page_num):
-        """Find matches for credit card expiration dates"""
-        print(f"\n[i] Searching for Card Expiration Dates...")
-        
-        # Get the page text
-        text = page.get_text()
-        
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
-        
-        # Expiration date patterns
-        patterns = [
-            # MM/YY format
-            r"\b(0[1-9]|1[0-2])[\/\-\s](\d{2})\b",
-            
-            # MM/YYYY format
-            r"\b(0[1-9]|1[0-2])[\/\-\s](20\d{2})\b",
-            
-            # Common labels with expiration dates
-            r"\b(exp|expires|expiration|expiry|valid\s+through|valid\s+until|good\s+through|date)[:.\s]+(0[1-9]|1[0-2])[\/\-\s](\d{2}|20\d{2})\b",
-            
-            # Text formats
-            r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b"
+        """Find credit card expiration date matches in the page"""
+        expiration_patterns = [
+            r"\b(?:0[1-9]|1[0-2])[-/](?:[0-9]{2}|2[0-9]{3})\b",  # MM/YY or MM/YYYY
+            r"\b(?:0[1-9]|1[0-2])[-/](?:[0-9]{2})\b",  # MM/YY
+            r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[,\s]+\d{4}\b",  # Month YYYY
+            r"\b(?:expir(?:y|ation)|valid thru|good thru)[\s:]*(?:0[1-9]|1[0-2])[-/](?:[0-9]{2}|2[0-9]{3})\b"  # With labels
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("cc_expiration", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        matches = []
+        text = page.get_text()
         
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Extract the actual expiration date if it's in a labeled format
-                if ":" in match_text:
-                    parts = match_text.split(":")
-                    for part in parts[1:]:  # Look after the colon
-                        if re.search(r"(0[1-9]|1[0-2])[\/\-\s](\d{2}|20\d{2})", part):
-                            match_text = part.strip()
-                            break
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "Card Expiration Date",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
+        for pattern in expiration_patterns:
+            found = re.finditer(pattern, text, re.IGNORECASE)
+            for match in found:
+                if not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        print(f"[i] Found {len(redactions)} card expiration date matches on page {page_num + 1}")
-        return redactions
+        return matches
 
     def find_aadhaar_matches(self, page, page_num):
-        """Find matches for Aadhaar numbers"""
-        print(f"\n[i] Searching for Aadhaar Numbers...")
+        """Find Aadhaar number matches in the page"""
+        aadhaar_patterns = [
+            r"\b\d{4}\s?\d{4}\s?\d{4}\b",
+            r"\b(?:Aadhaar|आधार)[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b",
+            r"\bUID[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"
+        ]
         
-        # Get the page text and find all matches
+        matches = []
         text = page.get_text()
         
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
+        for pattern in aadhaar_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                aadhaar = re.sub(r'[-\s]', '', match.group())
+                if self.is_valid_aadhaar(aadhaar) and not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        # Default to English patterns if language is not supported
-        if lang_code not in ["hi", "en"]:
-            lang_code = "en"
-        
-        # Aadhaar patterns
-        patterns = self.get_language_specific_patterns(lang_code).get("aadhaar", [])
-        if lang_code != "hi":  # If not Hindi, use default Aadhaar pattern
-            patterns = [
-                r"\b\d{4}\s?\d{4}\s?\d{4}\b",  # Standard 12-digit Aadhaar
-                r"\bAadhaar(?:\s+Number)?[:.\s]+\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"  # Prefixed with "Aadhaar" in Hindi
-            ]
-        
-        redactions = []
-        aadhaar_matches = []
-        
-        # Process each pattern
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                if self.should_preserve_heading(match_text) and self.config.preserve_headings:
-                    print(f" |  Preserving heading/label: {match_text}")
-                    continue
-                
-                # Try to get the rectangle for this match
-                match_quads = page.search_for(match_text)
-                if match_quads:
-                    for quad in match_quads:
-                        # Convert quad to rectangle
-                        rect = quad.rect
-                        # Add redaction
-                        if self.config.use_blur:
-                            redactions.append((rect, self.blur_text(match_text)))
-                        else:
-                            redactions.append((rect, self.color_map.get(self.config.color, (0, 0, 0))))
-                
-                    aadhaar_matches.append(match_text)
-        
-        # Output the matches
-        print(f" |  Found {len(aadhaar_matches)} Aadhaar Numbers on Page {page_num + 1}: {', '.join(aadhaar_matches)}")
-        
-        # Store redaction information for reporting
-        page_key = f"Page {page_num + 1}"
-        if page_key not in self.report_data["redacted_items"]:
-            self.report_data["redacted_items"][page_key] = {}
-        
-        self.report_data["redacted_items"][page_key]["Aadhaar Numbers"] = aadhaar_matches
-        
-        return redactions
+        return matches
 
     def find_pan_matches(self, page, page_num):
-        """Find matches for PAN card numbers"""
-        print(f"\n[i] Searching for PAN Numbers...")
+        """Find PAN card number matches in the page"""
+        pan_patterns = [
+            r"\b[A-Z]{5}\d{4}[A-Z]\b",
+            r"\b(?:PAN|Permanent Account Number|पैन)[\s:]*[A-Z]{5}\d{4}[A-Z]\b"
+        ]
         
-        # Get the page text and find all matches
+        matches = []
         text = page.get_text()
         
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
+        for pattern in pan_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                pan = re.sub(r'[-\s]', '', match.group())
+                if self.is_valid_pan(pan) and not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        # Default to English patterns if language is not supported
-        if lang_code not in ["hi", "en"]:
-            lang_code = "en"
+        return matches
+
+    @staticmethod
+    def is_valid_aadhaar(aadhaar):
+        """Validate Aadhaar number using Verhoeff algorithm"""
+        # Remove any spaces or special characters
+        aadhaar = re.sub(r'[-\s]', '', aadhaar)
         
-        # PAN patterns
-        patterns = self.get_language_specific_patterns(lang_code).get("pan", [])
-        if lang_code != "hi":  # If not Hindi, use default PAN pattern
-            patterns = [
-                r"\b[A-Z]{5}\d{4}[A-Z]\b",  # Standard PAN format
-                r"\bPAN\s*[:.\s]+[A-Z]{5}\d{4}[A-Z]\b"  # With PAN prefix
-            ]
+        if not re.match(r'^\d{12}$', aadhaar):
+            return False
+            
+        # Verhoeff algorithm multiplication table
+        mult = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+            [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+            [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+            [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+            [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+            [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+            [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+            [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+            [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        ]
         
-        redactions = []
-        pan_matches = []
+        # Verhoeff algorithm permutation table
+        perm = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+            [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+            [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+            [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+            [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+            [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+            [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+        ]
         
-        # Process each pattern
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                if self.should_preserve_heading(match_text) and self.config.preserve_headings:
-                    print(f" |  Preserving heading/label: {match_text}")
-                    continue
-                
-                # Try to get the rectangle for this match
-                match_quads = page.search_for(match_text)
-                if match_quads:
-                    for quad in match_quads:
-                        # Convert quad to rectangle
-                        rect = quad.rect
-                        # Add redaction
-                        if self.config.use_blur:
-                            redactions.append((rect, self.blur_text(match_text)))
-                        else:
-                            redactions.append((rect, self.color_map.get(self.config.color, (0, 0, 0))))
-                
-                    pan_matches.append(match_text)
+        # Verhoeff algorithm inverse table
+        inv = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9]
         
-        # Output the matches
-        print(f" |  Found {len(pan_matches)} PAN Numbers on Page {page_num + 1}: {', '.join(pan_matches)}")
+        # Calculate checksum
+        check = 0
+        for i, digit in enumerate(reversed(aadhaar)):
+            check = mult[check][perm[i % 8][int(digit)]]
         
-        # Store redaction information for reporting
-        page_key = f"Page {page_num + 1}"
-        if page_key not in self.report_data["redacted_items"]:
-            self.report_data["redacted_items"][page_key] = {}
+        return check == 0
+
+    @staticmethod
+    def is_valid_pan(pan):
+        """Validate PAN card number format"""
+        # Remove any spaces or special characters
+        pan = re.sub(r'[-\s]', '', pan.upper())
         
-        self.report_data["redacted_items"][page_key]["PAN Numbers"] = pan_matches
-        
-        return redactions
+        if not re.match(r'^[A-Z]{5}\d{4}[A-Z]$', pan):
+            return False
+            
+        # Check if first character is valid
+        if pan[0] not in 'ABCDEFGHIJKLKLMNOPQRSTUVWXYZ':
+            return False
+            
+        # Check if fourth character is valid
+        if pan[3] not in 'ABCFGHLJPT':
+            return False
+            
+        # Check if fifth character is valid
+        if pan[4] not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            return False
+            
+        return True
 
     def find_iban_matches(self, page, page_num):
-        """Find matches for IBAN (International Bank Account Number)"""
-        print(f"\n[i] Searching for IBAN Numbers...")
-        
-        # Get the page text
-        text = page.get_text()
-        
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
-        
-        # IBAN patterns (general format and country-specific)
-        patterns = [
-            # General IBAN pattern with country code
-            r"\b[A-Z]{2}\d{2}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{1,12}\b",
-            
-            # With IBAN prefix
-            r"\b(iban|account)[:.\s]+([A-Z]{2}\d{2}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{4}[-\s]?[A-Z0-9]{1,12})\b",
-            
-            # UK format (GB + 2 digits + 4 letters + 6 digits + 8 digits)
-            r"\bGB\d{2}[-\s]?[A-Z]{4}[-\s]?\d{6}[-\s]?\d{8}\b",
-            
-            # German format (DE + 2 digits + 18 chars)
-            r"\bDE\d{2}[-\s]?\d{8}[-\s]?\d{10}\b",
-            
-            # French format (FR + 2 digits + 10 chars + 11 digits + 2 chars)
-            r"\bFR\d{2}[-\s]?\d{5}[-\s]?\d{5}[-\s]?[A-Z0-9]{11}[-\s]?\d{2}\b"
+        """Find IBAN matches in the page"""
+        iban_patterns = [
+            r"\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]?){0,16}\b",
+            r"\b(?:IBAN|International Bank Account Number)[\s:]*[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}(?:[A-Z0-9]?){0,16}\b"
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("iban", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        matches = []
+        text = page.get_text()
         
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Extract actual IBAN if it's in a labeled format
-                if ":" in match_text and any(country in match_text.upper() for country in ["GB", "DE", "FR", "ES", "IT", "NL"]):
-                    parts = match_text.split(":")
-                    for part in parts:
-                        if re.search(r"[A-Z]{2}\d{2}", part.upper()):
-                            match_text = part.strip()
-                            break
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "IBAN Number",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
+        for pattern in iban_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                iban = re.sub(r'\s+', '', match.group())
+                if self.is_valid_iban(iban) and not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        print(f"[i] Found {len(redactions)} IBAN matches on page {page_num + 1}")
-        return redactions
+        return matches
 
     def find_bic_matches(self, page, page_num):
-        """Find matches for BIC/SWIFT codes"""
-        print(f"\n[i] Searching for BIC/SWIFT Codes...")
-        
-        # Get the page text
-        text = page.get_text()
-        
-        # Get language-specific patterns
-        lang_code = self.config.language
-        if lang_code == "auto":
-            lang_code = self.detect_language(text)
-        
-        # BIC/SWIFT code patterns
-        patterns = [
-            # Standard BIC/SWIFT format (8 or 11 characters)
-            r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b",
-            
-            # With BIC/SWIFT prefix
-            r"\b(bic|swift|code)[:.\s]+([A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b"
+        """Find BIC/SWIFT code matches in the page"""
+        bic_patterns = [
+            r"\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b",
+            r"\b(?:BIC|SWIFT)[\s:]*[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b"
         ]
         
-        # Language-specific patterns
-        lang_patterns = self.get_language_specific_patterns(lang_code).get("bic", [])
-        if lang_patterns:
-            patterns.extend(lang_patterns)
+        matches = []
+        text = page.get_text()
         
-        # Find all matches and create redactions
-        redactions = []
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
-                match_text = match.group(0)
-                
-                # Extract actual BIC if it's in a labeled format
-                if ":" in match_text:
-                    parts = match_text.split(":")
-                    for part in parts:
-                        if re.search(r"[A-Z]{4}[A-Z]{2}", part.upper()):
-                            match_text = part.strip()
-                            break
-                
-                # Skip if it's part of a heading/label and preserve_headings is True
-                if self.config.preserve_headings and self.is_heading(match_text, self.config, lang_code):
-                    continue
-                
-                # Find match on page with its coordinates
-                instances = page.search_for(match_text)
-                for inst in instances:
-                    # Create redaction for this match
-                    redaction = {
-                        "type": "BIC/SWIFT Code",
-                        "match": match_text,
-                        "rect": inst,
-                        "quads": [inst.quad],
-                        "page": page_num
-                    }
-                    
-                    # Choose color based on config
-                    if self.config.use_blur:
-                        redaction["text"] = "*" * len(match_text)
-                    else:
-                        color = self.COLORS.get(self.config.color, self.COLORS["black"])
-                        redaction["fill"] = color
-                    
-                    redactions.append(redaction)
+        for pattern in bic_patterns:
+            found = re.finditer(pattern, text)
+            for match in found:
+                if self.is_valid_bic(match.group()) and not self.is_heading(text[max(0, match.start()-50):match.end()+50], self.config):
+                    matches.append({
+                        'text': match.group(),
+                        'bbox': page.search_for(match.group()),
+                        'page': page_num
+                    })
         
-        print(f"[i] Found {len(redactions)} BIC/SWIFT matches on page {page_num + 1}")
-        return redactions
+        return matches
+
+    @staticmethod
+    def is_valid_iban(iban):
+        """Validate IBAN using the MOD-97 algorithm"""
+        # Remove spaces and convert to uppercase
+        iban = re.sub(r'\s+', '', iban.upper())
+        
+        if not re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]{4,}$', iban):
+            return False
+        
+        # Move first 4 characters to end and convert letters to numbers
+        iban = iban[4:] + iban[:4]
+        iban_digits = ''
+        for char in iban:
+            if char.isdigit():
+                iban_digits += char
+            else:
+                iban_digits += str(ord(char) - ord('A') + 10)
+        
+        # Check if MOD-97 equals 1
+        return int(iban_digits) % 97 == 1
+
+    @staticmethod
+    def is_valid_bic(bic):
+        """Validate BIC/SWIFT code format"""
+        bic = re.sub(r'\s+', '', bic.upper())
+        
+        if not re.match(r'^[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$', bic):
+            return False
+        
+        # Check if bank code part (first 4 chars) contains only letters
+        if not bic[:4].isalpha():
+            return False
+        
+        # Check if country code (chars 5-6) is valid
+        if not bic[4:6].isalpha():
+            return False
+        
+        return True
 
     def find_custom_matches(self, page, page_num):
         """Find matches for custom pattern specified by the user"""
