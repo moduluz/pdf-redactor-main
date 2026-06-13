@@ -278,12 +278,12 @@ class PDFRedactor:
         """Extract text from PDF pages"""
         return [page.get_text("text") for page in pdf_document]
 
-    def find_matches(self, text_pages: List[str], pattern: str, label: str) -> List[str]:
+    def find_matches(self, text_pages: List[str], pattern: str, label: str, flags: int = re.IGNORECASE) -> List[str]:
         """Generic pattern matching function"""
         print(f"\n[i] Searching for {label}...")
         matches = []
         for i, page in enumerate(text_pages):
-            page_matches = re.findall(pattern, page, flags=re.IGNORECASE)
+            page_matches = re.findall(pattern, page, flags=flags)
             matches.extend(page_matches)
             print(f" |  Found {len(page_matches)} {label}{'' if len(page_matches)==1 else 's'} on Page {i+1}: {', '.join(str(p) for p in page_matches)}")
         return matches
@@ -292,6 +292,20 @@ class PDFRedactor:
         """Enhanced heading detection with language support and common patterns"""
         if not config.preserve_headings:
             return False
+
+        # Sensitive data labels should NEVER be treated as headings
+        sensitive_prefixes = [
+            "cvv", "cvc", "cvv2", "cid", "csc", "cvn", "cvd",
+            "expiry", "expiration", "exp.", "exp ", "exp:",
+            "valid thru", "good thru",
+            "iban", "bic", "swift",
+            "aadhaar", "pan:", "pan ", "uid",
+            "security code", "card code",
+        ]
+        text_lower = text.strip().lower()
+        for prefix in sensitive_prefixes:
+            if text_lower.startswith(prefix):
+                return False
 
         # Get language-specific heading patterns
         lang_patterns = self.LANGUAGE_HEADING_PATTERNS.get(language_code, self.LANGUAGE_HEADING_PATTERNS["en"])
@@ -716,11 +730,11 @@ class PDFRedactor:
         # Phone numbers - Improved detection with international formats
         if config.redact_phone:
             phone_patterns = [
-                r"\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}",  # Standard format
-                r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US format: 123-456-7890
+                r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US/Canada: +1-555-123-4567
                 r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",  # US format: (123) 456-7890
                 r"\b\+\d{1,3}\s?\d{2,3}\s?\d{3,4}\s?\d{3,4}\b",  # International: +XX XX XXXX XXXX
-                r"\b\d{5,6}[-.\s]?\d{5,6}\b"  # Some European formats
+                r"\b\+91[-.\s]?[6-9]\d{9}\b",  # Indian mobile: +91 9876543210
+                r"\b0\d{2,4}[-.\s]?\d{6,8}\b",  # Indian landline
             ]
             sensitive_patterns.extend(phone_patterns)
             
@@ -798,7 +812,6 @@ class PDFRedactor:
                 r"\bCID\s*:?\s*\d{3,4}\b",  # CID: 123 (Card Identification Number used by AmEx)
                 r"\bCVN\s*:?\s*\d{3,4}\b",  # CVN: 123 (Card Verification Number)
                 r"\bCVD\s*:?\s*\d{3,4}\b",  # CVD: 123 (Card Verification Data)
-                r"(?<!\d)\d{3,4}(?!\d)"  # Isolated 3-4 digit numbers that might be CVV/CSC
             ]
             
             sensitive_patterns.extend(cvv_patterns)
@@ -835,13 +848,16 @@ class PDFRedactor:
         if config.redact_bic:
             bic_pattern = r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b"  # Standard BIC/SWIFT format
             sensitive_patterns.append(bic_pattern)
-            bic_matches = self.find_matches(text_pages, bic_pattern, "BIC/SWIFT Codes")
+            # Use case-sensitive matching (flags=0) to avoid matching common English words
+            bic_matches = self.find_matches(text_pages, bic_pattern, "BIC/SWIFT Codes", flags=0)
+            # Filter through BIC validation to remove false positives
+            bic_matches = [m for m in bic_matches if self.is_valid_bic(m)]
             self.redact_matches(pdf_document, bic_matches, config)
             
-            # Also look for BIC labels with content
+            # Also look for BIC labels with content (case-sensitive)
             bic_label_pattern = r"\bBIC\s*:?\s*[A-Z0-9]{8,11}\b"
             sensitive_patterns.append(bic_label_pattern)
-            bic_label_matches = self.find_matches(text_pages, bic_label_pattern, "BIC Labels")
+            bic_label_matches = self.find_matches(text_pages, bic_label_pattern, "BIC Labels", flags=0)
             self.redact_matches(pdf_document, bic_label_matches, config)
             
             if bic_matches or bic_label_matches:
