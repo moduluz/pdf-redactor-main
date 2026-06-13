@@ -33,15 +33,30 @@ pip install -r requirements.txt
 
 Command-line Usage
 ```bash
-python pdf_redactor.py input.pdf output.pdf
+# Basic usage
+python pdf_redactor.py -i input.pdf -o output.pdf
+
+# Redact all sensitive information with report
+python pdf_redactor.py -i input.pdf --all --verify
 ```
 
-Web Interface
+Web Interface (Development)
 ```bash
 cd flask
 python app.py
 ```
-
 Then, visit http://127.0.0.1:5000 in your browser.
 
+## Production Deployment
 
+A production-ready WSGI entrypoint (`wsgi.py`) is provided, utilizing [Waitress](https://docs.pylonsproject.org/projects/waitress/en/latest/).
+
+To run in production:
+```bash
+# Ensure production dependencies are installed
+pip install -r requirements.txt
+
+# Run the production server
+python wsgi.py
+```
+The server will be available at http://0.0.0.0:8080. You can configure the host and port using environment variables `HOST` and `PORT`.
