@@ -29,7 +29,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(REDACTED_DIR, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-in-production'  # Set a secret key for flash messages and sessions
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())  # Use env var in production
 
 @app.route('/', methods=['GET'])
 def index():
