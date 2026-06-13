@@ -185,7 +185,7 @@ def redact():
             
             logger.info(success_msg)
             flash(success_msg, 'success')
-            return redirect(url_for('download'))
+            return redirect(url_for('index'))
             
         except Exception as e:
             logger.exception("Redaction process failed")
