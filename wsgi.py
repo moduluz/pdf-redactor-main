@@ -14,8 +14,9 @@ if 'SECRET_KEY' not in os.environ:
     os.environ['SECRET_KEY'] = os.urandom(24).hex()
     logger.info("Generated new SECRET_KEY for session security")
 
-# Import the flask app
-from flask.app import app
+# Add local flask folder to path to avoid conflict with flask library
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'flask'))
+from app import app
 
 if __name__ == '__main__':
     from waitress import serve
