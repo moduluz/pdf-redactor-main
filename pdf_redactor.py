@@ -160,11 +160,11 @@ class PDFRedactor:
     def detect_language(self, text):
         """Detect language of the text using langdetect"""
         try:
-            detect_langs = detect_langs(text)
-            if detect_langs:
+            langs = detect_langs(text)
+            if langs:
                 # Take the most probable language
-                return detect_langs[0].lang
-        except:
+                return langs[0].lang
+        except Exception:
             pass
         # Default to English if detection fails
         return "en"
@@ -285,7 +285,12 @@ class PDFRedactor:
         for i, page in enumerate(text_pages):
             page_matches = re.findall(pattern, page, flags=flags)
             matches.extend(page_matches)
-            print(f" |  Found {len(page_matches)} {label}{'' if len(page_matches)==1 else 's'} on Page {i+1}: {', '.join(str(p) for p in page_matches)}")
+            count = len(page_matches)
+            suffix = '' if count == 1 or label.endswith('s') else 's'
+            if page_matches:
+                print(f" |  Found {count} {label}{suffix} on Page {i+1}: {', '.join(str(p) for p in page_matches)}")
+            else:
+                print(f" |  Found 0 {label} on Page {i+1}")
         return matches
 
     def is_heading(self, text: str, config: RedactionConfig, language_code: str = "en") -> bool:
@@ -888,6 +893,44 @@ class PDFRedactor:
             if iban_matches_all:
                 redacted_items["IBAN Numbers"] = list(set(iban_matches_all))
 
+        # Aadhaar Numbers
+        if config.redact_aadhaar:
+            aadhaar_patterns = [
+                r"\b\d{4}\s?\d{4}\s?\d{4}\b",
+                r"\b(?:Aadhaar|UID)[\s:]*\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"
+            ]
+            sensitive_patterns.extend(aadhaar_patterns)
+            aadhaar_matches_all = []
+            for pattern in aadhaar_patterns:
+                aadhaar_matches = self.find_matches(text_pages, pattern, "Aadhaar Numbers")
+                # Validate each match using Verhoeff algorithm
+                validated = [m for m in aadhaar_matches if self.is_valid_aadhaar(re.sub(r'[-\s]', '', m))]
+                aadhaar_matches_all.extend(validated)
+            # Remove duplicates
+            aadhaar_matches_all = list(dict.fromkeys(aadhaar_matches_all))
+            self.redact_matches(pdf_document, aadhaar_matches_all, config)
+            if aadhaar_matches_all:
+                redacted_items["Aadhaar Numbers"] = aadhaar_matches_all
+
+        # PAN Numbers
+        if config.redact_pan:
+            pan_patterns = [
+                r"\b[A-Z]{5}\d{4}[A-Z]\b",
+                r"\b(?:PAN|Permanent Account Number)[\s:]*[A-Z]{5}\d{4}[A-Z]\b"
+            ]
+            sensitive_patterns.extend(pan_patterns)
+            pan_matches_all = []
+            for pattern in pan_patterns:
+                pan_matches = self.find_matches(text_pages, pattern, "PAN Numbers", flags=0)
+                # Validate each match
+                validated = [m for m in pan_matches if self.is_valid_pan(re.sub(r'[-\s]', '', m))]
+                pan_matches_all.extend(validated)
+            # Remove duplicates
+            pan_matches_all = list(dict.fromkeys(pan_matches_all))
+            self.redact_matches(pdf_document, pan_matches_all, config)
+            if pan_matches_all:
+                redacted_items["PAN Numbers"] = pan_matches_all
+
         # Image redaction tracking
         if config.redact_images:
             image_redaction_info = self.redact_images(pdf_document, config)
@@ -949,11 +992,11 @@ class PDFRedactor:
         # Phone numbers
         if args.phonenumber:
             phone_patterns = [
-                r"\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}",  # Standard format
-                r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US format: 123-456-7890
+                r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # US/Canada
                 r"\b\(\d{3}\)\s*\d{3}[-.\s]?\d{4}\b",  # US format: (123) 456-7890
                 r"\b\+\d{1,3}\s?\d{2,3}\s?\d{3,4}\s?\d{3,4}\b",  # International: +XX XX XXXX XXXX
-                r"\b\d{5,6}[-.\s]?\d{5,6}\b"  # Some European formats
+                r"\b\+91[-.\s]?[6-9]\d{9}\b",  # Indian mobile
+                r"\b0\d{2,4}[-.\s]?\d{6,8}\b",  # Indian landline
             ]
             
             # Standard phonenumbers library detection
@@ -1088,12 +1131,15 @@ class PDFRedactor:
         bic_matches = []
         for pattern in bic_patterns:
             for page_num, page in enumerate(text_pages):
-                page_matches = re.findall(pattern, page, flags=re.IGNORECASE)
+                # Use case-sensitive matching (flags=0) to avoid matching common English words
+                page_matches = re.findall(pattern, page, flags=0)
                 for match in page_matches:
-                    bic_matches.append({
-                        "value": match,
-                        "page": page_num + 1
-                    })
+                    # Validate BIC format to filter false positives
+                    if PDFRedactor.is_valid_bic(match):
+                        bic_matches.append({
+                            "value": match,
+                            "page": page_num + 1
+                        })
         
         if bic_matches:
             findings["BIC/SWIFT Codes"] = bic_matches
@@ -1877,15 +1923,29 @@ def print_sensitivity_report_summary(redaction_stats):
                 print(f"  - {category}: {count} item(s)")
 
 def main():
-    parser = argparse.ArgumentParser(description="PDF Redactor Tool")
+    parser = argparse.ArgumentParser(
+        description="PDF Redactor - Securely redact sensitive information from PDFs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python pdf_redactor.py -i input.pdf --all
+  python pdf_redactor.py -i input.pdf --phonenumber --email
+  python pdf_redactor.py -i input.pdf --all --blur --color red
+  python pdf_redactor.py -i input.pdf --all --report-only
+  python pdf_redactor.py -i input.pdf --aadhaar --pan --verify"""
+    )
     parser.add_argument("-i", "--input", required=True, help="Input PDF file path")
-    parser.add_argument("-o", "--output", help="Output PDF file path")
+    parser.add_argument("-o", "--output", help="Output PDF file path (default: <input>_redacted.pdf)")
+    parser.add_argument("--all", action="store_true", help="Enable all redaction types")
     parser.add_argument("--phonenumber", action="store_true", help="Redact phone numbers")
     parser.add_argument("--email", action="store_true", help="Redact email addresses")
+    parser.add_argument("--cc", action="store_true", help="Redact credit card numbers")
+    parser.add_argument("--cvv", action="store_true", help="Redact CVV/CVC codes")
+    parser.add_argument("--expiry", action="store_true", help="Redact card expiration dates")
     parser.add_argument("--iban", action="store_true", help="Redact IBAN numbers")
+    parser.add_argument("--bic", action="store_true", help="Redact BIC/SWIFT codes")
     parser.add_argument("--aadhaar", action="store_true", help="Redact Aadhaar numbers (Indian national ID)")
     parser.add_argument("--pan", action="store_true", help="Redact PAN numbers (Indian tax ID)")
-    parser.add_argument("--mask", help="Custom text to mask/redact")
+    parser.add_argument("--mask", help="Custom text or regex pattern to mask/redact")
     parser.add_argument("--redact-images", action="store_true", help="Redact sensitive information in images using OCR")
     parser.add_argument("--verify", action="store_true", help="Verify redaction after processing")
     parser.add_argument("--no-preserve-headings", action="store_true", help="Don't preserve text that looks like headings/labels")
@@ -1896,10 +1956,23 @@ def main():
     
     args = parser.parse_args()
     
-    # Debug command line args
-    print("\n[DEBUG] Command line args:")
-    for arg in vars(args):
-        print(f"{arg}: {getattr(args, arg)}")
+    # Handle --all flag: enable all redaction types
+    if args.all:
+        args.phonenumber = True
+        args.email = True
+        args.cc = True
+        args.cvv = True
+        args.expiry = True
+        args.iban = True
+        args.bic = True
+        args.aadhaar = True
+        args.pan = True
+    
+    # Validate that at least one redaction type is selected
+    redaction_flags = [args.phonenumber, args.email, args.cc, args.cvv, args.expiry,
+                       args.iban, args.bic, args.aadhaar, args.pan]
+    if not any(redaction_flags) and not args.mask:
+        parser.error("Please select at least one redaction type (e.g., --phonenumber, --email, --all) or use --mask")
     
     # Determine output path if not specified
     if not args.output:
@@ -1907,18 +1980,18 @@ def main():
         output_path = input_path.parent / f"{input_path.stem}_redacted{input_path.suffix}"
         args.output = str(output_path)
     
-    # Create config object
+    # Create config object with proper flag mapping
     config = RedactionConfig(
         redact_phone=args.phonenumber,
         redact_email=args.email,
         redact_iban=args.iban,
-        redact_cc=args.iban,  # Credit card redaction is tied to IBAN for now
-        redact_cvv=args.iban,  # CVV redaction is tied to IBAN for now
-        redact_cc_expiration=args.iban,  # CC expiration redaction is tied to IBAN for now
-        redact_bic=args.iban,  # BIC redaction is tied to IBAN for now
-        redact_bic_label=args.iban,  # BIC label redaction is tied to IBAN for now
-        redact_aadhaar=args.aadhaar,  # New Aadhaar redaction option
-        redact_pan=args.pan,  # New PAN redaction option
+        redact_cc=args.cc,
+        redact_cvv=args.cvv,
+        redact_cc_expiration=args.expiry,
+        redact_bic=args.bic,
+        redact_bic_label=args.bic,
+        redact_aadhaar=args.aadhaar,
+        redact_pan=args.pan,
         redact_images=args.redact_images,
         preserve_headings=not args.no_preserve_headings,
         custom_mask=args.mask,
@@ -1931,50 +2004,27 @@ def main():
         verify=args.verify
     )
     
-    # Debug the created config object
-    print("\n[DEBUG] RedactionConfig object:")
-    for field in config.__annotations__:
-        print(f"{field}: {getattr(config, field)}")
-    
-    # Create color banner
+    # Print banner
     print_color_banner()
     
-    # Check if in report-only mode
-    if args.report_only:
-        print(f"\n[i] Scanning file for sensitive information without redacting: {args.input}")
-        redactor = PDFRedactor(config)
-        
-        # Call the redact_document method to get the number of redactions
-        total_redactions = redactor.redact_document()
-        
-        report_path = f"{os.path.splitext(args.input)[0]}_sensitivity_report.json"
-        print(f"\n[i] Sensitivity report saved to: {report_path}")
-        
-        # Print a summary of the redaction report
-        print_sensitivity_report_summary(redactor.redaction_stats)
-        
-        # Print recommendation
-        print("\n[RECOMMENDATION]")
-        print(f"Sensitive information was found in this document. To redact it, run:")
-        cmd = f"  python pdf_redactor.py -i \"{args.input}\" {args.input}"
-        if args.phonenumber:
-            cmd += " --phonenumber"
-        if args.email:
-            cmd += " --email"
-        if args.iban:
-            cmd += " --iban"
-        if args.aadhaar:
-            cmd += " --aadhaar"
-        if args.pan:
-            cmd += " --pan"
-        if args.verify:
-            cmd += " --verify"
-        
-        print(cmd)
-    else:
-        # Run the redaction
+    # Log configuration
+    logger.info(f"Input: {args.input}")
+    logger.info(f"Output: {args.output}")
+    enabled = [name for name, flag in [
+        ('Phone', args.phonenumber), ('Email', args.email), ('CC', args.cc),
+        ('CVV', args.cvv), ('Expiry', args.expiry), ('IBAN', args.iban),
+        ('BIC', args.bic), ('Aadhaar', args.aadhaar), ('PAN', args.pan),
+        ('Images', args.redact_images)
+    ] if flag]
+    logger.info(f"Redacting: {', '.join(enabled) if enabled else 'None (custom mask only)'}")
+    
+    # Run redaction
+    try:
         redactor = PDFRedactor(config)
         redactor.redact_document()
+    except Exception as e:
+        logger.error(f"Redaction failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
