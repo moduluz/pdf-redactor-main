@@ -26,7 +26,7 @@ It supports both a CLI for batch operations and a Flask-based web interface.
 
 2. Clone and install python dependencies:
 ```bash
-git clone https://github.com/moduluz/pdf-redactor-main.git
+git clone https://github.com/moduluz/pdf-redactor-main.git //jist
 cd pdf-redactor-main
 pip install -r requirements.txt
 ```
